@@ -2228,3 +2228,202 @@ def main():
 if __name__ == "__main__":
     main()
 ```
+# Comparing method effectiveness
+Finally I use the following R script to compare the effectiveness of different methods with different variables
+
+For this I have 
+
+1) A tsv file with information on known genes that are specific in expression to certain cell types that look like following
+
+methods_comparison.txt
+```txt
+Gene	Cell Type (with extra info)	Cell type (for comparison)	Reference	Specificity Score (human)
+MYH7	Cardiomyocytes	cardiomyocytes	"Canonical marker, PanglaoDB"	n/a
+TNNI3	Cardiomyocytes	cardiomyocytes	"PanglaoDB, 100% specificity"	n/a
+TNNT2	Cardiomyocytes	cardiomyocytes	PanglaoDB specificity	n/a
+ALB	Hepatocytes	hepatocytes	Hepatocyte marker article	1
+CYP2E1	Hepatocytes (zone-specific)	hepatocytes	Biocompare hepatocyte zonation	0.575
+GFAP	Astrocytes	astrocytes	Canonical astrocyte marker	0.344
+```
+2)Following R script saved in the same directory as methods_comparison.txt
+
+```R
+library("rstudioapi") 
+setwd(dirname(getActiveDocumentContext()$path))
+
+###############################################################################
+# Match/No Match -> Excel with Conditional Formatting (All Columns Colored)
+###############################################################################
+
+# ---- Optional: Set working directory to script location if in RStudio ----
+if (requireNamespace("rstudioapi", quietly = TRUE)) {
+  if (rstudioapi::isAvailable()) {
+    try({
+      setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+    }, silent = TRUE)
+  }
+}
+
+# ---- Packages ----
+# install.packages("openxlsx")  # Run once if you don't have it
+library(openxlsx)
+
+# ---- CONFIG: Change these paths if needed ----
+methods_path <- "methods_comparison.txt"           # Tab-delimited methods file
+export_paths <- list.files("./outputs_to_compare")                # One or more tab-delimited export files
+out_path     <- "methods_comparison.updated.xlsx"  # Output Excel file
+
+# ---- General options ----
+options(stringsAsFactors = FALSE)
+
+# ---- Helpers ----
+normalize_text <- function(x) {
+  x2 <- ifelse(is.na(x), "", x)
+  x2 <- trimws(x2)
+  x2 <- gsub("\\s+", " ", x2)    # collapse multiple spaces
+  tolower(x2)
+}
+
+mk_key <- function(gene, cell) {
+  paste(normalize_text(gene), normalize_text(cell), sep = "||")
+}
+
+# Try regex patterns first, then normalized fuzzy matching
+find_col <- function(df, patterns) {
+  nms <- names(df)
+  # Regex search
+  for (p in patterns) {
+    hit <- which(grepl(p, nms, ignore.case = TRUE, perl = TRUE))
+    if (length(hit) > 0) return(nms[hit[1]])
+  }
+  # Fuzzy fallback: lowercase, remove punctuation, collapse spaces
+  nms_norm <- tolower(gsub("[^a-z0-9]+", " ", nms))
+  nms_norm <- trimws(gsub("\\s+", " ", nms_norm))
+  lookup <- c("gene", "gene name", "genename",
+              "cell type", "celltype",
+              "cell type (comparison)", "cell type for comparison")
+  for (cand in lookup) {
+    idx <- which(nms_norm == cand)
+    if (length(idx) > 0) return(nms[idx[1]])
+  }
+  return(NULL)
+}
+
+# Sanitize label (column name) derived from filename
+sanitize_label <- function(path) {
+  base <- basename(path)
+  base_no_ext <- sub("\\.[^.]+$", "", base)
+  lab <- gsub("[^A-Za-z0-9]+", "_", base_no_ext)  # non-alphanum -> underscore
+  lab <- gsub("^_+|_+$", "", lab)                 # trim boundary underscores
+  if (lab == "") lab <- "export"
+  lab
+}
+
+# Clean carriage returns and whitespace in character columns
+clean_text_columns <- function(df) {
+  for (i in seq_along(df)) {
+    if (is.character(df[[i]])) {
+      df[[i]] <- trimws(gsub("\r", "", df[[i]]))
+    }
+  }
+  df
+}
+
+# ---- Read methods file ----
+methods <- tryCatch(
+  utils::read.delim(methods_path, check.names = FALSE),
+  error = function(e) stop("Failed to read methods file: ", e$message)
+)
+
+# Identify gene & cell type columns in methods
+col_gene_methods <- find_col(methods, c("^gene$", "^gene\\b", "^gene\\s*name$"))
+col_cell_methods <- find_col(methods, c("^cell\\s*type\\s*\\(.*comparison.*\\)$",
+                                        "^cell\\s*type\\s*\\(for\\s*comparison\\)$",
+                                        "^cell\\s*type.*comparison$",
+                                        "^cell\\s*type$"))
+if (is.null(col_gene_methods) || is.null(col_cell_methods)) {
+  stop("Required columns not found in methods file. ",
+       "Looked for gene and cell type (comparison). Found columns: ",
+       paste(names(methods), collapse = ", "))
+}
+
+# Build normalized keys for methods rows
+methods_keys <- mk_key(methods[[col_gene_methods]], methods[[col_cell_methods]])
+
+# ---- Process each export file ----
+for (exp_path in export_paths) {
+  exp_df <- tryCatch(
+    utils::read.delim(exp_path, check.names = FALSE),
+    error = function(e) stop(sprintf("Failed to read export file '%s': %s", exp_path, e$message))
+  )
+  
+  # Identify gene & cell type columns in export
+  col_gene_export <- find_col(exp_df, c("^gene\\s*name$", "^gene\\s*name\\b", "^gene$"))
+  col_cell_export <- find_col(exp_df, c("^cell\\s*type$", "^cell\\s*type\\b", "^cell$"))
+  if (is.null(col_gene_export) || is.null(col_cell_export)) {
+    stop(sprintf("Required columns not found in export file: %s. Found columns: %s",
+                 exp_path, paste(names(exp_df), collapse = ", ")))
+  }
+  
+  # Build set of keys present in the export
+  export_keys <- unique(mk_key(exp_df[[col_gene_export]], exp_df[[col_cell_export]]))
+  
+  # Compute Match/No Match vector for methods rows
+  result_vec <- ifelse(methods_keys %in% export_keys, "Match", "No Match")
+  
+  # Add/Update a column named after the export file
+  label <- sanitize_label(exp_path)
+  methods[[label]] <- result_vec
+  message(sprintf("Processed %s -> column '%s' added/updated.", exp_path, label))
+}
+
+# ---- Clean text columns so conditional rules match reliably ----
+methods <- clean_text_columns(methods)
+
+# ---- Write output to Excel with conditional formatting on ALL columns ----
+wb <- createWorkbook()
+addWorksheet(wb, "Results")
+writeData(wb, "Results", methods)
+
+# Styles (Excel standard green/red)
+greenStyle <- createStyle(fontColour = "#006100", bgFill = "#C6EFCE")
+redStyle   <- createStyle(fontColour = "#9C0006", bgFill = "#FFC7CE")
+
+n_rows <- nrow(methods)
+n_cols <- ncol(methods)
+
+# Apply formatting to rows 2..(n+1) to skip header, across ALL columns
+for (col_idx in seq_len(n_cols)) {
+  # Color cells that CONTAIN "Match" (case-sensitive; adjust if you need case-insensitive)
+  conditionalFormatting(
+    wb, "Results", cols = col_idx, rows = 2:(n_rows + 1),
+    type = "contains", rule = "Match", style = greenStyle
+  )
+  # Color cells that CONTAIN "No Match"
+  conditionalFormatting(
+    wb, "Results", cols = col_idx, rows = 2:(n_rows + 1),
+    type = "contains", rule = "No Match", style = redStyle
+  )
+}
+
+# Optional: Auto column widths
+setColWidths(wb, "Results", cols = 1:n_cols, widths = "auto")
+
+# Save the workbook
+saveWorkbook(wb, out_path, overwrite = TRUE)
+message(sprintf("Wrote Excel file with formatting to: %s", out_path))
+```
+And the output files from previous analyziz that looks like following INSIDE A SUBDIRECTORY IN CURRENT WORKING DIRECTORY NAMED "outputs_to_compare"
+
+Example output file from previous analysis. This comparison only checks for the presense of Gene name and Cell type in both data sheets
+
+```
+Gene	Gene name	Cell type	avg_nCPM	clusters_used	Enrichment score	single_cell_type_gene
+ENSG00000164871	SPAG11B	epididymal principal cells	6432.6	5	87803.51917	FALSE
+ENSG00000158874	APOA2	hepatocytes	44653.42857	7	55570.36378	FALSE
+ENSG00000228083	IFNA14	pdcs	50.94285714	7	50942.85714	FALSE
+ENSG00000213030	CGB8	syncytiotrophoblasts	47.33333333	3	38222.43617	FALSE
+ENSG00000286135	ENSG00000286135	epididymal principal cells	245.88	5	35610.49017	FALSE
+ENSG00000203970	DEFB110	epididymal principal cells	531.86	5	31273.12245	FALSE
+```
+
