@@ -8,6 +8,7 @@ This page explains 3 different ways I used to build a tool to measure cell speci
 
 #Method 02 - AUROC SCORES
 
+https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression/blob/main/README.md#method-02---auroc-scores
 
 #Method 03 - Enrichment score with more robust statistical backup systems to filter useful data
 
