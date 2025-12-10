@@ -2274,7 +2274,8 @@ library(openxlsx)
 
 # ---- CONFIG: Change these paths if needed ----
 methods_path <- "methods_comparison.txt"           # Tab-delimited methods file
-export_paths <- list.files("./outputs_to_compare")                # One or more tab-delimited export files
+
+export_paths <- paste("outputs_to_compare/",list.files("./outputs_to_compare",recursive = TRUE),sep = '')                # One or more tab-delimited export files
 out_path     <- "methods_comparison.updated.xlsx"  # Output Excel file
 
 # ---- General options ----
@@ -2416,6 +2417,7 @@ setColWidths(wb, "Results", cols = 1:n_cols, widths = "auto")
 # Save the workbook
 saveWorkbook(wb, out_path, overwrite = TRUE)
 message(sprintf("Wrote Excel file with formatting to: %s", out_path))
+
 ```
 3) And the output files from previous analysis that looks like following INSIDE A SUBDIRECTORY IN CURRENT WORKING DIRECTORY NAMED "outputs_to_compare"
 
