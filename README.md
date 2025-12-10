@@ -1612,10 +1612,13 @@ After splitting, you can run the calculating scripts
 Just like previous efforts, this calculations also has a python script that does the calculations for you
 
 You can run it like following
+```
+sbatch enrich_array.sbatch
+```
 
 in addition to running it like sbatch with defaults, you also have the option to customize flags at submit time like
 
-
+```
 export B=200
 export CV=0.15
 export RELDELTA=0.05
@@ -1625,7 +1628,7 @@ export TISSUE_WEIGHTING=weighted
 export PSEUDOCOUNT=0.001
 
 sbatch --array=1-${PARTS} enrich_array.sbatch
-
+```
 
 
 enrich_array.sbatch
