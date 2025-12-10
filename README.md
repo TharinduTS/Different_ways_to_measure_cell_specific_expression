@@ -2417,7 +2417,7 @@ setColWidths(wb, "Results", cols = 1:n_cols, widths = "auto")
 saveWorkbook(wb, out_path, overwrite = TRUE)
 message(sprintf("Wrote Excel file with formatting to: %s", out_path))
 ```
-3) And the output files from previous analyziz that looks like following INSIDE A SUBDIRECTORY IN CURRENT WORKING DIRECTORY NAMED "outputs_to_compare"
+3) And the output files from previous analysis that looks like following INSIDE A SUBDIRECTORY IN CURRENT WORKING DIRECTORY NAMED "outputs_to_compare"
 
 Example output file from previous analysis. This comparison only checks for the presense of Gene name and Cell type in both data sheets
 
