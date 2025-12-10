@@ -1030,7 +1030,6 @@ python compute_auroc_cli.py \
   --ratio-min 3.0 \
   --clusters-min 2 \
   --alpha 0.1
-  --keep-constant-auc05
 ```
 --file -input file
 
@@ -1047,8 +1046,6 @@ python compute_auroc_cli.py \
 --clusters-min -minimum number of clusters in target cell type. 2: Ensures there’s at least minimal within-cell-type replication.
 
 --alpha -sets the pseudocount added when calculating the robust ratio to stabilize division by very small or zero medians, which is important because it prevents inflated ratios and ensures more reliable specificity scoring in sparse
-
---keep-constant-auc05 -Keep AUROC = 0.5 for constant-score groups (instead of NaN):
 
 
 Following is the python script
