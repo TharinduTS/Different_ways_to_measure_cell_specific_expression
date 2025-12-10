@@ -3,7 +3,7 @@ This page explains 3 different ways I used to build a tool to measure cell speci
 
 #Method 01 - Simple Enrichment Scores
 
-
+https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression/blob/main/README.md#method-01---simple-enrichment-scores
 
 
 #Method 02 - AUROC SCORES
