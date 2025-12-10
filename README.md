@@ -39,7 +39,7 @@ Then I calculated Enrichment Scores for different gene-cell type combinations wi
 
 You can run it like following
 ```
-python cal_enrich_with_custom_clustor_no.py   --input-file rna_single_cell_cluster.tsv   --output-file my_custom_clustor_no_enrichment.tsv   --min-clusters 3
+python cal_enrich_with_custom_clustor_no.py   --input-file rna_single_cell_cluster.tsv   --output-file my_custom_clustor_enrichment.tsv   --min-clusters 3
 ```
 --input-file gives you the option to select input tsv file
 
@@ -303,7 +303,7 @@ of data points from the previous output). This resulting tool lets the user sele
 You can run this as
 ```
 python plot_interactive.py \
-  -f my_custom_clustor_no_enrichment.tsv \
+  -f my_custom_clustor_enrichment.tsv \
   -o simple_enrichment_with_custom_clustor_number.html \
   -n 1000 \
   --log \
