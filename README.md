@@ -24,6 +24,7 @@ Enrichment score is a simple the ratio between -  the average nCPM in a particu
 
 following is the head of the file I obtained from Human Protein Atlas
 https://www.proteinatlas.org/humanproteome/single+cell/single+cell+type/data
+
 rna_single_cell_clusters.tsv.zip
 
 rna_single_cell_cluster.tsv
@@ -41,8 +42,10 @@ You can run it like following
 python cal_enrich_with_custom_clustor_no.py   --input-file rna_single_cell_cluster.tsv   --output-file my_custom_clustor_no_enrichment.tsv   --min-clusters 3
 ```
 --input-file gives you the option to select input tsv file
+
 --output-file gives you the option to select output tsv file
 In addition to that, this also produces a file with top 100 enrichment values
+
 --min-clusters THIS IS IMPORTANT. This input tsv can have cell clusters mistakenly assigned to wrong cell types.
 Therefore I use a minimum number of cell clusters a particular gene-cell type combination should have to be included
 in this calculation
