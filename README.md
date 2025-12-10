@@ -959,3 +959,242 @@ def main():
 if __name__ == "__main__":
     main()
 ```
+# METHOD 02 - AUROC SCORES
+
+This calculates a little more complicated measure- auroc score instead enrichment scores
+
+This uses the same input file 
+
+Just like enrichment scores, this calculates auroc scores with a python script.
+Because it takes more computing power, I decided to submit a job on computecanada.
+
+you can run it like following
+
+run_auroc.sbatch
+```
+#!/bin/bash
+#SBATCH --job-name=auroc
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --time=20:00:00
+#SBATCH --output=logs/auroc_%A_%a.out
+#SBATCH --error=logs/auroc_%A_%a.err
+#SBATCH --account=def-ben
+
+#SBATCH --mail-user=premacht@mcmaster.ca
+#SBATCH --mail-type=BEGIN
+#SBATCH --mail-type=END
+#SBATCH --mail-type=FAIL
+#SBATCH --mail-type=REQUEUE
+#SBATCH --mail-type=ALL
+
+# ---------------------------
+# Environment
+# ---------------------------
+module load gcc arrow
+module load python
+
+python -m venv ~/envs/scanpy
+source ~/envs/scanpy/bin/activate
+
+python compute_auroc_cli.py \
+  --file rna_single_cell_cluster.tsv \
+  --out-all all_gene_cell_auroc.tsv \
+  --out-top top100_auroc.tsv \
+  --auroc-min 0.92 \
+  --median-min 2.0 \
+  --ratio-min 3.0 \
+  --clusters-min 2 \
+  --alpha 0.1
+  --keep-constant-auc05
+```
+--file -input file
+
+--out-all -output file name for all files 
+
+--out-top -output file name for top 100 file
+
+--auroc-min -minimum AUROC to keep. 0.90: Keeps gene–cell-type pairs with strong separation from other cell types in the same tissue.
+
+--median-min -minimum median nCPM in target cell type. 1.0: Avoids keeping “specific but trivially low” expression.
+
+--ratio-min -minimum (median_target+α)/(median_others+α).2.0: Requires the median in the target cell type to be at least ~2× higher than the median of others (with a small pseudocount α=0.1 to stabilize zeros).
+
+--clusters-min -minimum number of clusters in target cell type. 2: Ensures there’s at least minimal within-cell-type replication.
+
+--alpha -sets the pseudocount added when calculating the robust ratio to stabilize division by very small or zero medians, which is important because it prevents inflated ratios and ensures more reliable specificity scoring in sparse
+
+--keep-constant-auc05 -Keep AUROC = 0.5 for constant-score groups (instead of NaN):
+
+
+Following is the python script
+
+compute_auroc_cli.py
+```
+#!/usr/bin/env python3
+"""
+Compute AUROC specificity per (Gene × Tissue × Cell type) using cluster-level nCPM,
+apply thresholds, and save filtered outputs. Designed for the file:
+    rna_single_cell_cluster.tsv
+
+Expected columns:
+- Gene
+- Gene name
+- Tissue
+- Cluster
+- Cell type
+- Read count
+- nCPM
+
+CLI arguments let you set thresholds, input/output, and pseudocount α for robust ratio.
+"""
+
+import argparse
+import pandas as pd
+import numpy as np
+from sklearn.metrics import roc_auc_score
+
+
+def compute_auroc(scores: np.ndarray, labels: np.ndarray) -> float:
+    """
+    Compute AUROC given scores and binary labels (1=target cell type, 0=others).
+    Returns NaN if AUROC is not computable (e.g., only one class).
+    If all scores are constant, returns 0.5 (no discrimination).
+    """
+    pos = int(labels.sum())
+    n = len(labels)
+    if pos == 0 or pos == n:
+        return np.nan
+    if np.allclose(scores, scores[0]):
+        return 0.5
+    try:
+        return float(roc_auc_score(labels, scores))
+    except Exception:
+        return np.nan
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Compute AUROC per (Gene × Tissue × Cell type) with thresholds.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    ap.add_argument("--file", "-f", default="rna_single_cell_cluster.tsv",
+                    help="Input TSV file with cluster-level data.")
+    ap.add_argument("--out-all", default="all_gene_cell_auroc.tsv",
+                    help="Output TSV for all passing rows after filtering.")
+    ap.add_argument("--out-top", default="top100_auroc.tsv",
+                    help="Output TSV for top-100 rows after filtering.")
+    ap.add_argument("--auroc-min", type=float, default=0.90,
+                    help="Minimum AUROC to keep a row.")
+    ap.add_argument("--median-min", type=float, default=1.0,
+                    help="Minimum median nCPM in target cell type.")
+    ap.add_argument("--ratio-min", type=float, default=2.0,
+                    help="Minimum robust ratio (median_target+α)/(median_others+α).")
+    ap.add_argument("--clusters-min", type=int, default=2,
+                    help="Minimum clusters in target cell type.")
+    ap.add_argument("--alpha", type=float, default=0.1,
+                    help="Pseudocount α for robust ratio stabilization.")
+    ap.add_argument("--keep-constant-auc05", action="store_true",
+                    help="If set, constant-score cases keep AUROC=0.5; otherwise they are NaN.")
+    args = ap.parse_args()
+
+    # -------- Load data --------
+    in_path = args.file
+    df = pd.read_csv(in_path, sep="\t")
+    df.columns = [c.strip() for c in df.columns]
+
+    required_cols = ["Gene", "Gene name", "Tissue", "Cluster", "Cell type", "nCPM"]
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"Input missing required columns: {missing}")
+
+    df["nCPM"] = pd.to_numeric(df["nCPM"], errors="coerce")
+    df = df.dropna(subset=["nCPM"])
+
+    # -------- Main loop: per (Tissue × Gene × Cell type) --------
+    rows = []
+    group_cols = ["Tissue", "Gene"]
+
+    for (tissue, gene), subdf in df.groupby(group_cols, sort=False):
+        ctypes = subdf["Cell type"].dropna().unique().tolist()
+        if len(ctypes) < 2:
+            # No contrast possible
+            continue
+
+        ct_medians = subdf.groupby("Cell type")["nCPM"].median().to_dict()
+        ct_counts = subdf.groupby("Cell type")["nCPM"].size().to_dict()
+
+        for ct in ctypes:
+            labels = (subdf["Cell type"] == ct).astype(int).values
+            scores = subdf["nCPM"].values
+
+            # AUROC computation with optional handling of constant scores
+            pos = int(labels.sum())
+            n = len(labels)
+            if pos == 0 or pos == n:
+                auc = np.nan
+            elif np.allclose(scores, scores[0]):
+                auc = 0.5 if args.keep_constant_auc05 else np.nan
+            else:
+                auc = compute_auroc(scores, labels)
+
+            # Robust ratio
+            target_med = ct_medians.get(ct, np.nan)
+            other_meds = [m for k, m in ct_medians.items() if k != ct and not pd.isna(m)]
+            other_med = np.median(other_meds) if len(other_meds) > 0 else np.nan
+
+            robust_ratio = np.nan
+            if not pd.isna(target_med) and not pd.isna(other_med):
+                robust_ratio = (target_med + args.alpha) / (other_med + args.alpha)
+
+            single_ct_flag = (len(ctypes) == 1)
+
+            rows.append({
+                "Gene": gene,
+                "Gene name": subdf["Gene name"].iloc[0],
+                "Tissue": tissue,
+                "Cell type": ct,
+                "clusters_used": int(ct_counts.get(ct, 0)),
+                "median_nCPM": float(target_med) if not pd.isna(target_med) else np.nan,
+                "robust_ratio": float(robust_ratio) if not pd.isna(robust_ratio) else np.nan,
+                "AUROC": float(auc) if not pd.isna(auc) else np.nan,
+                "single_cell_type_gene": single_ct_flag
+            })
+
+    auroc_df = pd.DataFrame(rows)
+
+    # -------- Apply thresholds --------
+    def passes_thresholds(row) -> bool:
+        if pd.isna(row["AUROC"]) or pd.isna(row["median_nCPM"]) or pd.isna(row["robust_ratio"]):
+            return False
+        if row["clusters_used"] < args.clusters_min:
+            return False
+        if row["AUROC"] < args.auroc_min:
+            return False
+        if row["median_nCPM"] < args.median_min:
+            return False
+        if row["robust_ratio"] < args.ratio_min:
+            return False
+        return True
+
+    filtered_df = auroc_df[auroc_df.apply(passes_thresholds, axis=1)].copy()
+
+    # Sort by AUROC (desc), then robust_ratio, then median_nCPM
+    filtered_df = filtered_df.sort_values(
+        by=["AUROC", "robust_ratio", "median_nCPM"],
+        ascending=[False, False, False]
+    )
+    # -------- Save outputs --------
+    filtered_df.to_csv(args.out_all, sep="\t", index=False)
+    filtered_df.head(100).to_csv(args.out_top, sep="\t", index=False)
+
+    print("\033[33mSaved files:\033[0m", args.out_all, ",", args.out_top)
+    print(
+        f"Thresholds: AUROC ≥ {args.auroc_min}, median_nCPM ≥ {args.median_min}, "
+        f"robust_ratio ≥ {args.ratio_min}, clusters_used ≥ {args.clusters_min}, α={args.alpha}"
+    )
+
+
+if __name__ == "__main__":
+    main()
+```
