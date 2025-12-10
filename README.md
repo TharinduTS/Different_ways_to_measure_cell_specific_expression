@@ -1205,3 +1205,100 @@ def main():
 if __name__ == "__main__":
     main()
 ```
+# METHOD03- Enrichment score with more robust statistical backup systems to filter useful data
+
+This method is much more complicated and takes much more computing power. Therefore I decided to split the input file into multiple files and process them simultaniously as a job array.
+
+Just like previous efforts, this also has a python script that does the calculations for you
+
+You can run it like following
+
+enrich_array.sbatch
+```
+#!/bin/bash
+#SBATCH --job-name=enrich_array
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=8G
+#SBATCH --time=02:00:00
+#SBATCH --array=1-20%5
+#SBATCH --output=logs/enrich_%A_%a.out
+#SBATCH --error=logs/enrich_%A_%a.err
+#SBATCH --account=def-ben
+
+#SBATCH --mail-user=premacht@mcmaster.ca
+#SBATCH --mail-type=BEGIN
+#SBATCH --mail-type=END
+#SBATCH --mail-type=FAIL
+#SBATCH --mail-type=REQUEUE
+#SBATCH --mail-type=ALL
+
+# ---------------------------
+# Configurable parameters (defaults target the current directory)
+# Override at submit-time if needed, e.g.:
+#   PARTS=50 INDIR=./chunks PREFIX=chunk_ OUTDIR=./parts_out sbatch enrich_array.sbatch
+# ---------------------------
+PARTS=${PARTS:-20}                # total number of chunks (must match your split)
+INDIR=${INDIR:-./splitted_input}  # directory holding part_XX.tsv(.gz) relative to CWD
+PREFIX=${PREFIX:-part_}           # chunk filename prefix (e.g., part_01.tsv.gz)
+OUTDIR=${OUTDIR:-./enrich_parts}  # where per-chunk outputs will be written (relative to CWD)
+
+# ---------------------------
+# Environment
+# ---------------------------
+module load gcc arrow
+module load python
+
+python -m venv ~/envs/scanpy
+source ~/envs/scanpy/bin/activate
+
+mkdir -p "$OUTDIR" logs
+
+# ---------------------------
+# Map array index -> chunk file
+# ---------------------------
+PADDED=$(printf "%02d" ${SLURM_ARRAY_TASK_ID})
+
+# Prefer .tsv.gz, fall back to .tsv if .gz doesn’t exist
+INPUT_GZ="${INDIR}/${PREFIX}${PADDED}.tsv.gz"
+INPUT_TSV="${INDIR}/${PREFIX}${PADDED}.tsv"
+if [ -s "$INPUT_GZ" ]; then
+  INPUT="$INPUT_GZ"
+elif [ -s "$INPUT_TSV" ]; then
+  INPUT="$INPUT_TSV"
+else
+  echo "[array] Missing input for index ${SLURM_ARRAY_TASK_ID}:"
+  echo "  tried: $INPUT_GZ and $INPUT_TSV" >&2
+  exit 2
+fi
+
+PREFIX_OUT="${OUTDIR}/adjusted_${PADDED}"
+
+echo "[array] task ${SLURM_ARRAY_TASK_ID}/${PARTS}"
+echo "[array] input:      $INPUT"
+echo "[array] out-prefix: $PREFIX_OUT"
+
+# ---------------------------
+# Run enrichment script per chunk
+# ---------------------------
+python min_clusters_and_enrichment.py \
+  --clusters "$INPUT" \
+  --out-prefix "$PREFIX_OUT" \
+  --B 100 \
+  --cv 0.20 \
+  --reldelta 0.10 \
+  --rho 0.90 \
+  --min-k 2 \
+  --tissue-weighting weighted \
+  --pseudocount 0.01
+```
+--B -Number of bootstrap tp be used
+
+--reldelta
+
+--rho
+
+--min-k
+
+--tissue-weighting
+
+--pseudocount
