@@ -1,6 +1,9 @@
 # Different_ways_to_measure_cell_specific_expression
 This page explains 3 different ways I used to build a tool to measure cell specific or enriched gene expression with bash/python and HTML
 
+#Method 01 -
+#Method 02 -
+#Method 03 - 
 #*** FOR ANY OF THESE TO WORK PROPERLY, YOU HAVE TO INSTALL REQUIRED PACKAGES OR LOAD A PYTHON ENVIRONMENT WITH REQUIRED PACKAGES FIRST **
 
 It looks like this on computecanada/alliancecan
