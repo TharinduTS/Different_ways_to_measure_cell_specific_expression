@@ -2249,7 +2249,7 @@ ALB	Hepatocytes	hepatocytes	Hepatocyte marker article	1
 CYP2E1	Hepatocytes (zone-specific)	hepatocytes	Biocompare hepatocyte zonation	0.575
 GFAP	Astrocytes	astrocytes	Canonical astrocyte marker	0.344
 ```
-2)Following R script saved in the same directory as methods_comparison.txt
+2) Following R script saved in the same directory as methods_comparison.txt
 
 ```R
 library("rstudioapi") 
@@ -2417,7 +2417,7 @@ setColWidths(wb, "Results", cols = 1:n_cols, widths = "auto")
 saveWorkbook(wb, out_path, overwrite = TRUE)
 message(sprintf("Wrote Excel file with formatting to: %s", out_path))
 ```
-And the output files from previous analyziz that looks like following INSIDE A SUBDIRECTORY IN CURRENT WORKING DIRECTORY NAMED "outputs_to_compare"
+3) And the output files from previous analyziz that looks like following INSIDE A SUBDIRECTORY IN CURRENT WORKING DIRECTORY NAMED "outputs_to_compare"
 
 Example output file from previous analysis. This comparison only checks for the presense of Gene name and Cell type in both data sheets
 
