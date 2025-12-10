@@ -311,14 +311,21 @@ python plot_interactive.py \
   --initial-zoom 100 \
   --lang en-CA
 ```
--f input_file
--o output file
--n number of datapoints to show in the plot
---log log transforms the enrichment scores to make it easier to view
---self-contained lets the user use this tool offline
---initial-zoom decides the number of data points(bars) to show when you open the tool
---lang en-CA Language
---horizontal plots horizontal instead default plot
+-f -input_file
+
+-o -output file
+
+-n -number of datapoints to show in the plot
+
+--log -log transforms the enrichment scores to make it easier to view
+
+--self-contained -lets the user use this tool offline
+
+--initial-zoom -decides the number of data points(bars) to show when you open the tool
+
+--lang en-CA -Language
+
+--horizontal -plots horizontal instead default plot
 
 following is the python script7
 
