@@ -280,3 +280,665 @@ top100 = agg_df.head(100)
 top100.to_csv("top100_enrichment.tsv", sep="\t", index=False)
 print("Saved top 100 rows to top100_enrichment.tsv")
 ```
+Then I wanted to plot this in an interactive way. This allows user to decide how many values to include in the plot (top x amount
+of data points from the previous output). This resulting tool lets the user select different cell types and genes to see the selected data points. In addition, you can export a tsv file with the selected values.
+
+You can run this as
+```
+python plot_interactive.py \
+  -f my_custom_clustor_no_enrichment.tsv \
+  -o interactive_markers_testing.html \
+  -n 1000 \
+  --log \
+  --self-contained \
+  --initial-zoom 100 \
+  --lang en-CA
+```
+-f input_file
+-o output file
+-n number of datapoints to show in the plot
+--log log transforms the enrichment scores to make it easier to view
+--self-contained lets the user use this tool offline
+--initial-zoom decides the number of data points(bars) to show when you open the tool
+--lang en-CA Language
+--horizontal plots horizontal instead default plot
+
+following is the python script7
+
+plot_interactive.py
+```py
+#!/usr/bin/env python3
+"""
+Interactive gene enrichment plot with filter/search and TSV export.
+
+- Loads TSV containing gene enrichment results.
+- Builds an interactive Plotly bar chart (log or linear, horizontal or vertical).
+- Injects an HTML UI with:
+  - Cell type filter
+  - Gene search
+  - Reset button
+  - **Export TSV** button (exports filtered view OR selected points)
+- Saves a standards-compliant HTML file (with <!DOCTYPE html>, <html lang="...">, and viewport meta).
+
+Usage example:
+    python test.py \
+      -f all_gene_cell_enrichment_data.tsv \
+      -o interactive_markers_testing.html \
+      -n 1000 \
+      --log \
+      --self-contained \
+      --horizontal \
+      --initial-zoom 100 \
+      --lang en-CA
+"""
+
+import argparse
+import json
+import re
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+
+
+# ---------- Data Loading ----------
+def load_tsv(path: str) -> pd.DataFrame:
+    """
+    Load the TSV file with required columns and prepare 'Label' for plotting.
+    Expects columns:
+      "Gene", "Gene name", "Cell type", "avg_nCPM", "clusters_used",
+      "Enrichment score", "single_cell_type_gene"
+    """
+    df = pd.read_csv(path, sep="\t")
+    # Clean column names
+    df.columns = [c.strip() for c in df.columns]
+    expected = [
+        "Gene",
+        "Gene name",
+        "Cell type",
+        "avg_nCPM",
+        "clusters_used",
+        "Enrichment score",
+        "single_cell_type_gene",
+    ]
+    missing = [c for c in expected if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing expected columns: {missing}")
+    # Coerce numeric columns
+    for col in ["avg_nCPM", "clusters_used", "Enrichment score"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    # Label: prefer Gene name, fallback to Gene
+    df["Label"] = df["Gene name"].fillna(df["Gene"])
+    # Drop rows missing critical fields (label/enrichment)
+    df = df.dropna(subset=["Label", "Enrichment score"])
+    return df
+
+
+# ---------- Figure Building ----------
+def build_fig(
+    df: pd.DataFrame,
+    top_n: int = 100,
+    use_log: bool = True,
+    orientation: str = "v",  # 'v' or 'h'
+    log_dtick: str | None = None,  # "D1" or "D2"
+    initial_zoom: int | None = None,  # initial number of bars to show
+):
+    """
+    Build the Plotly figure and construct a JSON payload for client-side filtering/export.
+    """
+    # Filter out non-positive values for log scale
+    if use_log:
+        df = df[df["Enrichment score"] > 0]
+
+    # Sort by enrichment and select top N
+    df_plot = df.sort_values("Enrichment score", ascending=False).head(top_n).copy()
+
+    # Prepare customdata for click/selection (detailCols order)
+    detail_cols = [
+        "Gene",
+        "Gene name",
+        "Cell type",
+        "avg_nCPM",
+        "clusters_used",
+        "Enrichment score",
+        "single_cell_type_gene",
+    ]
+    customdata = df_plot[detail_cols].values
+
+    # Stable color mapping by cell type
+    colors = px.colors.qualitative.Safe
+    ctypes = sorted(df_plot["Cell type"].astype(str).unique())
+    cmap = {ct: colors[i % len(colors)] for i, ct in enumerate(ctypes)}
+    bar_colors = df_plot["Cell type"].astype(str).map(cmap)
+
+    # Build bar trace
+    if orientation == "v":
+        x_vals = df_plot["Label"]
+        y_vals = df_plot["Enrichment score"]
+        bar = go.Bar(
+            x=x_vals,
+            y=y_vals,
+            customdata=customdata,
+            marker_color=bar_colors,
+            hovertemplate=(
+                "<b>%{x}</b><br>"
+                "Enrichment: %{y:.2f}<br>"
+                "Cell type: %{customdata[2]}<br>"
+                "avg_nCPM: %{customdata[3]}<br>"
+                "clusters_used: %{customdata[4]}<br>"
+                "<extra></extra>"
+            ),
+            # Enable visual feedback for selection
+            selected={"marker": {"opacity": 1.0}},
+            unselected={"marker": {"opacity": 0.5}},
+        )
+    else:
+        x_vals = df_plot["Enrichment score"]
+        y_vals = df_plot["Label"]
+        bar = go.Bar(
+            x=x_vals,
+            y=y_vals,
+            orientation="h",
+            customdata=customdata,
+            marker_color=bar_colors,
+            hovertemplate=(
+                "<b>%{y}</b><br>"
+                "Enrichment: %{x:.2f}<br>"
+                "Cell type: %{customdata[2]}<br>"
+                "avg_nCPM: %{customdata[3]}<br>"
+                "clusters_used: %{customdata[4]}<br>"
+                "<extra></extra>"
+            ),
+            selected={"marker": {"opacity": 1.0}},
+            unselected={"marker": {"opacity": 0.5}},
+        )
+
+    fig = go.Figure(data=[bar])
+
+    # Layout
+    fig.update_layout(
+        title="Gene Enrichment",
+        xaxis_title=("Enrichment score" if orientation == "h" else "Gene name"),
+        yaxis_title=("Gene name" if orientation == "h" else "Enrichment score"),
+        template="plotly_white",
+        height=700,
+        bargap=0.2,
+        margin=dict(l=60, r=30, t=60, b=120),
+        hovermode="closest",
+        legend_title_text="Cell type",
+        dragmode="select",  # Enable box selection by default
+    )
+
+    # Axes tweaks
+    if orientation == "v":
+        fig.update_xaxes(tickangle=-45, automargin=True, categoryorder="array", categoryarray=list(df_plot["Label"]))
+        if use_log:
+            kwargs = dict(type="log", title="Enrichment score (log scale)")
+            if log_dtick in ("D1", "D2"):
+                kwargs["dtick"] = log_dtick
+            fig.update_yaxes(**kwargs)
+        else:
+            fig.update_yaxes(title="Enrichment score")
+    else:
+        fig.update_yaxes(automargin=True, categoryorder="array", categoryarray=list(df_plot["Label"]))
+        if use_log:
+            kwargs = dict(type="log", title="Enrichment score (log scale)")
+            if log_dtick in ("D1", "D2"):
+                kwargs["dtick"] = log_dtick
+            fig.update_xaxes(**kwargs)
+        else:
+            fig.update_xaxes(title="Enrichment score")
+
+    # Initial zoom (index-based range on category axis)
+    if initial_zoom is not None:
+        zoom_n = max(1, min(int(initial_zoom), len(df_plot)))
+        if orientation == "v":
+            fig.update_xaxes(range=[-0.5, zoom_n - 0.5])
+        else:
+            fig.update_yaxes(range=[-0.5, zoom_n - 0.5])
+
+    # Build JSON payload for reliable client-side filtering/export
+    rows = df_plot[
+        [
+            "Gene",
+            "Gene name",
+            "Cell type",
+            "avg_nCPM",
+            "clusters_used",
+            "Enrichment score",
+            "single_cell_type_gene",
+            "Label",
+        ]
+    ].to_dict(orient="records")
+
+    payload = {
+        "rows": rows,
+        "colors": cmap,  # cell type -> color
+        "orientation": orientation,
+        "detail_cols": detail_cols,  # authoritative order for export/customdata
+        "label_col": "Label",
+        "enrich_col": "Enrichment score",
+    }
+    return fig, payload
+
+
+# ---------- HEAD meta for mobile ----------
+HEAD_SNIPPET = """<meta name="viewport" content="width=device-width, initial-scale=1">"""
+
+
+# ---------- Enhanced HTML (Details + Filters + Search + Export TSV) ----------
+# Raw string to preserve JS regex literals like /\s+/g without needing double backslashes
+DETAILS_SNIPPET = r"""
+<style>
+  #controls {
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    margin: 12px 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+  #controls label {
+    font-size: 14px;
+    color: #333;
+  }
+  #controls select, #controls input {
+    padding: 6px 8px;
+    font-size: 14px;
+  }
+  #controls button {
+    padding: 6px 10px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  #count-info {
+    font-size: 13px;
+    color: #666;
+    margin-left: 8px;
+  }
+  #details-panel {
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: #fafafa;
+    white-space: pre-wrap;
+    font-size: 14px;
+  }
+  #details-panel table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+  #details-panel td {
+    padding: 4px 8px;
+    border-bottom: 1px solid #eee;
+    vertical-align: top;
+  }
+  #details-panel td:first-child {
+    font-weight: 600;
+    color: #333;
+    width: 220px;
+  }
+  .plotly-graph-div { width: 100% !important; }
+</style>
+
+<div id="controls">
+  <label>Cell type:
+    <select id="celltype-filter"><option value="__all__">All cell types</option></select>
+  </label>
+  <label style="margin-left:12px;">Gene search:
+    <input type="text" id="gene-search" placeholder="e.g., LALBA">
+  </label>
+  <button id="reset-filters" title="Clear filters">Reset</button>
+  <button id="export-tsv" title="Export current view as TSV">Export TSV</button>
+  <span id="count-info"></span>
+</div>
+
+<div id="details-panel"><em>Click a bar to see full row details here. Lasso/box-select points to export only selected.</em></div>
+
+<!-- The Python side will inject a <script id="chart-data" type="application/json">...</script> before this script -->
+<script>
+(function(){
+  // Wait until the Plotly figure exists and is initialized
+  function initOnceReady() {
+    var gd = document.querySelector('div.plotly-graph-div') || document.querySelector('.js-plotly-plot');
+    var dataTag = document.getElementById('chart-data');
+    if (!gd || !gd.data || !gd.data.length || !dataTag) {
+      setTimeout(initOnceReady, 50);
+      return;
+    }
+
+    // Parse embedded JSON payload from Python
+    var payload = {};
+    try {
+      payload = JSON.parse(dataTag.textContent);
+    } catch(e) {
+      console.error("JSON parse error:", e);
+      return;
+    }
+
+    var rows = Array.isArray(payload.rows) ? payload.rows : [];
+    var colors = payload.colors || {};
+    var orientation = payload.orientation || 'v';
+    var detailCols = payload.detail_cols || ["Gene","Gene name","Cell type","avg_nCPM","clusters_used","Enrichment score","single_cell_type_gene"];
+    var labelCol = payload.label_col || "Label";
+    var enrichCol = payload.enrich_col || "Enrichment score";
+
+    // Controls
+    var sel = document.getElementById('celltype-filter');
+    var searchBox = document.getElementById('gene-search');
+    var resetBtn = document.getElementById('reset-filters');
+    var exportBtn = document.getElementById('export-tsv');
+    var panel = document.getElementById('details-panel');
+    var countInfo = document.getElementById('count-info');
+
+    // Number formatter for details panel
+    function fmtNumber(val, maxDigits=2) {
+      if (val === null || val === undefined || val === "" || isNaN(val)) return String(val ?? "");
+      var num = Number(val);
+      if (!isFinite(num)) return String(val);
+      return num.toLocaleString('en-US', { maximumFractionDigits: maxDigits });
+    }
+
+    // Build base arrays from rows (authoritative source)
+    var N = rows.length;
+
+    // Populate unique cell types into dropdown
+    var cellTypesSet = {};
+    for (var i = 0; i < N; i++) {
+      var ct = rows[i]["Cell type"];
+      if (ct != null) {
+        ct = String(ct).trim();
+        if (ct.length) cellTypesSet[ct] = true;
+      }
+    }
+    var cellTypes = Object.keys(cellTypesSet).sort();
+    cellTypes.forEach(function(ct){
+      var opt = document.createElement('option');
+      opt.value = ct;
+      opt.textContent = ct;
+      sel.appendChild(opt);
+    });
+
+    // Details panel render function
+    function renderDetails(customdata) {
+      if (!customdata || !customdata.length) return;
+      var html = "<table>";
+      for (var i = 0; i < detailCols.length; i++) {
+        var key = detailCols[i];
+        var val = customdata[i];
+        if (key === "avg_nCPM" || key === "Enrichment score") {
+          val = fmtNumber(val, 2);
+        }
+        html += "<tr><td>" + key + "</td><td>" + (val === null ? "" : val) + "</td></tr>";
+      }
+      html += "</table>";
+      panel.innerHTML = html;
+      panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
+    // Current filtered rows (used for export when no selection)
+    var filteredRows = [];
+    // Current selected rows (built from plotly_selected)
+    var selectedRows = [];
+
+    // Helper: convert rows to TSV using detailCols order
+    function rowsToTSV(rowsArr) {
+      var cols = detailCols.slice();
+      var lines = [];
+      // Header
+      lines.push(cols.join('\t'));
+      // Body
+      for (var i = 0; i < rowsArr.length; i++) {
+        var r = rowsArr[i];
+        var out = [];
+        for (var j = 0; j < cols.length; j++) {
+          var key = cols[j];
+          var val = r[key];
+          // Normalize and escape tabs/newlines
+          var s = (val === null || val === undefined) ? '' : String(val);
+          s = s.replace(/\r?\n/g, ' ').replace(/\t/g, ' ');
+          out.push(s);
+        }
+        lines.push(out.join('\t'));
+      }
+      return lines.join('\n');
+    }
+
+    // Trigger a browser download of a given string as a file
+    function downloadTextFile(filename, text) {
+      var blob = new Blob([text], { type: 'text/tab-separated-values;charset=utf-8' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function(){
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 0);
+    }
+
+    // Export button: prefer selected rows if present; otherwise use filtered rows
+    exportBtn.addEventListener('click', function(){
+      var toExport = (selectedRows && selectedRows.length) ? selectedRows : filteredRows;
+      if (!toExport || !toExport.length) {
+        alert('No rows to export. Use filters/search or select points first.');
+        return;
+      }
+      var tsv = rowsToTSV(toExport);
+      // Build a descriptive filename
+      var suffix = [];
+      if (selectedRows && selectedRows.length) suffix.push('selection');
+      var selectedCT = sel.value;
+      var q = (searchBox.value || '').trim();
+      if (selectedCT && selectedCT !== '__all__') suffix.push(selectedCT.replace(/\s+/g, '_'));
+      if (q) suffix.push('q_' + q.replace(/\s+/g, '_'));
+      var fname = 'export' + (suffix.length ? '_' + suffix.join('_') : '') + '.tsv';
+      downloadTextFile(fname, tsv);
+    });
+
+    // Filtering function: update plot + filteredRows cache
+    function applyFilter() {
+      var selectedCT = sel.value;
+      var q = (searchBox.value || "").trim().toLowerCase();
+
+      var fx = [], fy = [], fcd = [], fcol = [];
+      filteredRows = []; // reset cache
+
+      for (var i = 0; i < N; i++) {
+        var row = rows[i];
+        var ct = (row["Cell type"] == null ? "" : String(row["Cell type"]).trim());
+        var geneName = String(row["Gene name"] || "").toLowerCase();
+        var labelLower = String(row[labelCol] || "").toLowerCase();
+        var ctOk = (selectedCT === "__all__") || (selectedCT === ct);
+        var qOk = (!q) || geneName.includes(q) || labelLower.includes(q);
+
+        if (ctOk && qOk) {
+          filteredRows.push(row); // cache for export
+
+          if (orientation === 'h') {
+            fx.push(row[enrichCol]);   // enrichment on x
+            fy.push(row[labelCol]);    // labels on y
+          } else {
+            fx.push(row[labelCol]);    // labels on x
+            fy.push(row[enrichCol]);   // enrichment on y
+          }
+          fcd.push(detailCols.map(function(k){ return row[k]; }));
+          fcol.push(colors[ct] || '#636EFA');
+        }
+      }
+
+      // Restyle robustly
+      var update = { x: [fx], y: [fy], customdata: [fcd], marker: [{ color: fcol }] };
+      Plotly.restyle(gd, update, [0]);
+
+      // Keep category order aligned with filtered labels
+      var relayout = {};
+      if (orientation === 'h') {
+        relayout['yaxis.categoryorder'] = 'array';
+        relayout['yaxis.categoryarray'] = fy;
+      } else {
+        relayout['xaxis.categoryorder'] = 'array';
+        relayout['xaxis.categoryarray'] = fx;
+      }
+      Plotly.relayout(gd, relayout);
+      countInfo.textContent = (fx.length) + " shown of " + N;
+
+      // Clearing selection state: when filter changes, drop previous selection
+      selectedRows = [];
+    }
+
+    // Wire filter/search/reset
+    sel.addEventListener('change', applyFilter);
+    searchBox.addEventListener('input', applyFilter);
+    resetBtn.addEventListener('click', function(){
+      sel.value = "__all__";
+      searchBox.value = "";
+      applyFilter();
+    });
+
+    // Initial count
+    countInfo.textContent = N + " shown of " + N;
+
+    // Click → details panel
+    var clickHandler = function(evt) {
+      var e = evt && evt.points ? evt : (evt && evt.detail ? evt.detail : null);
+      if (!e || !e.points || !e.points.length) return;
+      var p = e.points[0];
+      renderDetails(p.customdata);
+    };
+    if (typeof gd.on === 'function') gd.on('plotly_click', clickHandler);
+    else gd.addEventListener('plotly_click', clickHandler);
+
+    // Selection → build selectedRows (reconstruct objects using detailCols)
+    function collectSelectedRows(evt) {
+      selectedRows = [];
+      if (!evt || !evt.points) return;
+      for (var i = 0; i < evt.points.length; i++) {
+        var p = evt.points[i];
+        var cd = p.customdata;
+        if (Array.isArray(cd)) {
+          var obj = {};
+          for (var j = 0; j < detailCols.length; j++) {
+            obj[detailCols[j]] = cd[j];
+          }
+          selectedRows.push(obj);
+        }
+      }
+    }
+    if (typeof gd.on === 'function') gd.on('plotly_selected', collectSelectedRows);
+    else gd.addEventListener('plotly_selected', collectSelectedRows);
+  }
+
+  // Start readiness check
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initOnceReady);
+  } else {
+    initOnceReady();
+  }
+})();
+</script>
+"""
+
+
+# ---------- HTML Saving (standards-compliant, embeds JSON payload) ----------
+def save_html(fig: go.Figure, out_path: str, payload: dict, self_contained: bool = False, lang_code: str = "en"):
+    """
+    Save a robust, standards-compliant HTML:
+    - Ensures <!DOCTYPE html> at the very beginning (No Quirks Mode).
+    - Adds lang="..." on <html>.
+    - Injects viewport meta just after <head>.
+    - Embeds a JSON payload with rows & colors for client-side filtering and export.
+    - Appends DETAILS_SNIPPET before </body> using a callable replacement to avoid backslash parsing.
+    """
+    include_js = True if self_contained else "cdn"
+    html = fig.to_html(full_html=True, include_plotlyjs=include_js)
+
+    # 1) Ensure <!DOCTYPE html> at the very beginning
+    html = html.lstrip(" \ufeff\r\n\t")
+    if not re.match(r"(?is)^<!doctype\s+html>", html):
+        html = "<!DOCTYPE html>\n" + html
+
+    # 2) Ensure <html lang="...">
+    if re.search(r"(?is)<html(?:\s[^>]*)?>", html):
+        if not re.search(r"(?is)<html[^>]*\blang\s*=", html):
+            html = re.sub(r"(?is)<html(\s*)>", f'<html lang="{lang_code}">', html, count=1)
+    else:
+        html = f"<!DOCTYPE html>\n<html lang=\"{lang_code}\">\n{html}\n</html>"
+
+    # 3) Inject <meta name="viewport"> immediately after <head>
+    if re.search(r"(?is)<head\s*>", html):
+        html = re.sub(r"(?is)<head\s*>", "<head>\n" + HEAD_SNIPPET + "\n", html, count=1)
+    else:
+        html = re.sub(
+            r"(?is)(<html[^>]*>)",
+            r"\1\n<head>\n" + HEAD_SNIPPET + "\n</head>\n",
+            html,
+            count=1,
+        )
+
+    # 4) Embed JSON payload (safe single <script> with application/json)
+    json_str = json.dumps(payload, ensure_ascii=False)
+    data_block = f'<script id="chart-data" type="application/json">{json_str}</script>\n'
+
+    # Place the data block just before DETAILS_SNIPPET and </body>
+    if re.search(r"(?is)</body\s*>", html):
+        # Use a callable replacement to avoid backslash interpretation in the replacement string
+        html = re.sub(
+            r"(?is)</body\s*>",
+            lambda m: data_block + DETAILS_SNIPPET + "\n</body>",
+            html,
+            count=1,
+        )
+    else:
+        # Ensure a body exists, then append our blocks
+        if not re.search(r"(?is)<body[^>]*>", html):
+            html = re.sub(r"(?is)</head\s*>", "</head>\n<body>\n", html, count=1)
+        html = html + "\n" + data_block + DETAILS_SNIPPET + "\n</body>\n</html>"
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(html)
+
+
+# ---------- CLI ----------
+def main():
+    ap = argparse.ArgumentParser(
+        description="Make interactive gene enrichment chart (TSV → HTML) with details, filters, search, and TSV export"
+    )
+    ap.add_argument("--file", "-f", required=True, help="Input TSV file (e.g., all_gene_cell_enrichment_data.tsv)")
+    ap.add_argument("--out", "-o", default="interactive_markers.html", help="Output HTML file")
+    ap.add_argument("--top", "-n", type=int, default=100, help="Top N genes by enrichment")
+    ap.add_argument("--log", action="store_true", help="Use log scale on enrichment axis")
+    ap.add_argument("--linear", action="store_true", help="Use linear scale on enrichment axis")
+    ap.add_argument("--horizontal", action="store_true", help="Use horizontal bars (better for long labels)")
+    ap.add_argument("--self-contained", action="store_true", help="Embed plotly.js for fully offline HTML")
+    ap.add_argument("--log-digits", choices=["D1", "D2"], help="Log-axis minor digits: D1 (all) or D2 (2 & 5)")
+    ap.add_argument("--lang", default="en", help="HTML lang attribute (e.g., 'en', 'en-CA')")
+    ap.add_argument("--initial-zoom", type=int, default=100, help="Initial number of bars to show on load")
+
+    args = ap.parse_args()
+
+    if args.log and args.linear:
+        raise SystemExit("Choose either --log or --linear (not both).")
+
+    use_log = True if args.log or (not args.linear) else False
+    orientation = "h" if args.horizontal else "v"
+
+    df = load_tsv(args.file)
+    fig, payload = build_fig(
+        df,
+        top_n=args.top,
+        use_log=use_log,
+        orientation=orientation,
+        log_dtick=args.log_digits,
+        initial_zoom=args.initial_zoom,
+    )
+    save_html(fig, args.out, payload, self_contained=args.self_contained, lang_code=args.lang)
+    print(f"Saved: {args.out}")
+
+
+if __name__ == "__main__":
+    main()
+```
