@@ -7,7 +7,7 @@ It looks like this on computecanada/alliancecan
 ```
 module load gcc arrow
 module load python
-ython -m venv ~/envs/scanpy
+python -m venv ~/envs/scanpy
 source ~/envs/scanpy/bin/activate
 ```
 use something like following to install packages if they haven't been installed already
