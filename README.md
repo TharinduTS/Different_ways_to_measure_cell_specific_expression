@@ -304,7 +304,7 @@ You can run this as
 ```
 python plot_interactive.py \
   -f my_custom_clustor_no_enrichment.tsv \
-  -o interactive_markers_testing.html \
+  -o simple_enrichment_with_custom_clustor_number.html \
   -n 1000 \
   --log \
   --self-contained \
