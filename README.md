@@ -12,6 +12,7 @@ https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression
 
 #Method 03 - Enrichment score with more robust statistical backup systems to filter useful data
 
+https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression/blob/main/README.md#method-03---enrichment-score-with-more-robust-statistical-backup-systems-to-filter-useful-data
 
 #*** FOR ANY OF THESE TO WORK PROPERLY, YOU HAVE TO INSTALL REQUIRED PACKAGES OR LOAD A PYTHON ENVIRONMENT WITH REQUIRED PACKAGES FIRST **
 
