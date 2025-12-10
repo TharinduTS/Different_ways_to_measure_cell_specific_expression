@@ -1619,10 +1619,10 @@ enrich_array.sbatch
 ```
 #!/bin/bash
 #SBATCH --job-name=enrich_array
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=8G
-#SBATCH --time=02:00:00
-#SBATCH --array=1-20%5
+#SBATCH --cpus-per-task=6
+#SBATCH --mem=20G
+#SBATCH --time=20:00:00
+#SBATCH --array=1-20
 #SBATCH --output=logs/enrich_%A_%a.out
 #SBATCH --error=logs/enrich_%A_%a.err
 #SBATCH --account=def-ben
@@ -1692,6 +1692,7 @@ python min_clusters_and_enrichment.py \
   --min-k 2 \
   --tissue-weighting weighted \
   --pseudocount 0.01
+
 ```
 --B -sets the number of bootstrap/resampling iterations, which is important for testing the stability and robustness of the enrichment results.
 
