@@ -1613,7 +1613,20 @@ Just like previous efforts, this calculations also has a python script that does
 
 You can run it like following
 
-in addition to running it like sbatch 
+in addition to running it like sbatch with defaults, you also have the option to customize flags at submit time like
+
+
+export B=200
+export CV=0.15
+export RELDELTA=0.05
+export RHO=0.85
+export MIN_K=3
+export TISSUE_WEIGHTING=weighted
+export PSEUDOCOUNT=0.001
+
+sbatch --array=1-${PARTS} enrich_array.sbatch
+
+
 
 enrich_array.sbatch
 ```
@@ -1693,6 +1706,19 @@ python min_clusters_and_enrichment.py \
   --tissue-weighting weighted \
   --pseudocount 0.01
 
+```
+This array only works properly if you submit it as sbatch enrich_array.sbatch. If you use bash enrich_array.sbatch to test this first, you should use something like following
+```
+
+# Emulate array task 1 → should target part_01.tsv(.gz)
+export SLURM_ARRAY_TASK_ID=1
+export PARTS=20
+export INDIR=./splitted_input
+export PREFIX=part_
+export OUTDIR=./enrich_parts
+
+# Optional: show what the script will try
+bash -x enrich_array.sbatch | sed -n '1,120p'
 ```
 --B -sets the number of bootstrap/resampling iterations, which is important for testing the stability and robustness of the enrichment results.
 
