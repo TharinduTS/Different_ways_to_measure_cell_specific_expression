@@ -1209,9 +1209,411 @@ if __name__ == "__main__":
 
 This method is much more complicated and takes much more computing power. Therefore I decided to split the input file into multiple files and process them simultaniously as a job array.
 
-Just like previous efforts, this also has a python script that does the calculations for you
+Therefore, first you have to split this file, keeping same groups together
+
+Group-aware splitting (use --group-by "Gene,Cell type,Tissue" or "Cell type,Tissue"): keeps each unit intact, so within-tissue aggregation and the bootstrap performed in recommend_min_k() are not starved of clusters or mixed across chunks. Partial groups in different files can bias effective_clusters, CV, relative Δ, and rank ρ; grouping prevents that. Global recompute after merging filtered clusters: Your enrichment is defined as a ratio to other cell types per gene; any chunk-wise run sees only a subset of cell types/genes and can inflate/deflate denominators. Merging all *_filtered_clusters.tsv and running enrichment once globally restores the correct background across all cell types. Header verification & manifest: ensures consistent schema and lets you audit exactly which groups landed in each part.
+
+You can run this splitting script like following
+```
+python split_tsv_robust.py split \
+  --input rna_single_cell_cluster.tsv \
+  --parts 20 \
+  --group-by "Gene,Cell type,Tissue" \
+  --outdir splitted_input --prefix part_ --gzip-out \
+  --manifest split_manifest.json
+```
+
+This is the script used for that
+
+split_tsv_robust.py split
+```
+
+#!/usr/bin/env python3
+"""
+Robust TSV splitter for single-cell cluster data (and similar large TSVs).
+
+Focus: safeguards so splitting does **not** affect downstream enrichment calculations.
+
+Key features:
+- Header preserved in every part.
+- Two splitting modes:
+  1) block (raw even rows per part),
+  2) group-aware (keeps complete groups together in one part), with greedy balancing.
+- Recommended group key for your enrichment workflow: **Gene, Cell type, Tissue**
+  (or at minimum **Cell type, Tissue**) so bootstrap and aggregation remain intact within parts.
+- Optional gzip input/output; auto-detect by filename suffix.
+- Zero-padded numeric suffix in filenames (01..N, or wider as needed).
+- Safeguards: caps parts if total rows < parts; verifies required columns; writes a manifest JSON
+  with per-part row counts and group coverage; optional dry-run.
+- Merge subcommand to concatenate outputs (keeping one header) and schema checks.
+
+Usage examples:
+
+Split by groups to preserve units relevant to enrichment (recommended):
+  python split_tsv_robust.py split \
+    --input rna_single_cell_cluster.tsv \
+    --parts 20 \
+    --group-by "Gene,Cell type,Tissue" \
+    --outdir $SCRATCH/splitted_input --prefix part_ --gzip-out
+
+Block-wise split (simple):
+  python split_tsv_robust.py split --input rna_single_cell_cluster.tsv --parts 20
+
+Dry-run (plan only, no files):
+  python split_tsv_robust.py split --input rna_single_cell_cluster.tsv --parts 20 --group-by "Cell type,Tissue" --dry-run
+
+Merge chunk outputs back together (one header):
+  python split_tsv_robust.py merge \
+    --pattern "$SCRATCH/enrich_parts/adjusted_*_final_enrichment.tsv" \
+    --output merged_final_enrichment.tsv
+
+Two-pass safeguard (recommended end-to-end):
+  1) Run array jobs on parts to produce per-chunk "*_filtered_clusters.tsv".
+  2) Merge all filtered cluster chunks: `split_tsv_robust.py merge --pattern '.../*_filtered_clusters.tsv' --output merged_filtered_clusters.tsv`
+  3) Run **global** enrichment once on the merged filtered clusters to avoid partial baselines:
+     `python min_clusters_and_enrichment.py --clusters merged_filtered_clusters.tsv --out-prefix global_adjusted ...`
+
+Required columns (for your enrichment script):
+  Gene, Gene name, Tissue, Cluster, Cell type, Read count, nCPM
+"""
+import argparse
+import gzip
+import json
+import math
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional
+
+# -------------------------
+# Utilities
+# -------------------------
+def open_maybe_gzip(path: Path, mode: str = 'rt', encoding: Optional[str] = 'utf-8'):
+    """Open plain text or gzip based on suffix. Accepts text ('rt','wt') or binary modes."""
+    p = str(path)
+    if p.endswith('.gz'):
+        return gzip.open(p, mode)
+    else:
+        if 't' in mode:
+            return path.open(mode, encoding=encoding)
+        return path.open(mode)
+
+def parse_group_by(group_by: Optional[str]) -> List[str]:
+    if not group_by:
+        return []
+    cols = [c.strip() for c in group_by.split(',') if c.strip()]
+    return cols
+
+REQUIRED_COLS = ["Gene", "Gene name", "Tissue", "Cluster", "Cell type", "Read count", "nCPM"]
+
+def check_required_columns(header: str, required_cols: List[str]) -> None:
+    cols = header.rstrip('\n').split('\t')
+    missing = [c for c in required_cols if c not in cols]
+    if missing:
+        raise SystemExit(f"Input header missing required columns: {missing}. Found: {cols}")
+
+def zero_pad_width(parts: int) -> int:
+    return max(2, len(str(parts)))
+
+def make_out_name(outdir: Path, prefix: str, idx: int, pad: int, gzip_out: bool) -> Path:
+    suffix = '.tsv.gz' if gzip_out else '.tsv'
+    return outdir / f"{prefix}{idx:0{pad}d}{suffix}"
+
+# -------------------------
+# Block-wise split
+# -------------------------
+def split_block(input_path: Path, parts: int, outdir: Path, prefix: str, gzip_out: bool,
+                rows_per_part_override: Optional[int], dry_run: bool) -> Dict:
+    # First pass: read header + count rows
+    with open_maybe_gzip(input_path, 'rt') as f:
+        header = f.readline()
+        if not header:
+            raise SystemExit("Empty file or missing header")
+        total_rows = sum(1 for _ in f)
+    if total_rows == 0:
+        raise SystemExit("No data rows found (only header)")
+
+    # Safeguard: cap parts to total_rows or compute from override
+    if rows_per_part_override and rows_per_part_override > 0:
+        parts = math.ceil(total_rows / rows_per_part_override)
+    parts = min(parts, total_rows)
+
+    rows_per_part = math.ceil(total_rows / parts)
+    pad = zero_pad_width(parts)
+
+    plan = {
+        'mode': 'block',
+        'parts': parts,
+        'rows_per_part': rows_per_part,
+        'total_rows': total_rows,
+        'outdir': str(outdir),
+        'prefix': prefix,
+        'files': []
+    }
+
+    if dry_run:
+        counts = [rows_per_part] * (parts - 1) + [total_rows - rows_per_part * (parts - 1)]
+        for i, cnt in enumerate(counts, start=1):
+            plan['files'].append({'name': make_out_name(outdir, prefix, i, pad, gzip_out).name,
+                                  'rows_including_header': cnt + 1})
+        return plan
+
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    with open_maybe_gzip(input_path, 'rt') as f:
+        header = f.readline()
+        part_idx = 1
+        rows_written_in_part = 0
+        out_file_path = make_out_name(outdir, prefix, part_idx, pad, gzip_out)
+        out_file = open_maybe_gzip(out_file_path, 'wt')
+        out_file.write(header)
+        lines_in_current_file = 1
+        per_file_counts = []
+
+        for line in f:
+            if rows_written_in_part >= rows_per_part and part_idx < parts:
+                out_file.close()
+                per_file_counts.append((out_file_path.name, lines_in_current_file))
+                part_idx += 1
+                rows_written_in_part = 0
+                out_file_path = make_out_name(outdir, prefix, part_idx, pad, gzip_out)
+                out_file = open_maybe_gzip(out_file_path, 'wt')
+                out_file.write(header)
+                lines_in_current_file = 1
+            out_file.write(line)
+            rows_written_in_part += 1
+            lines_in_current_file += 1
+        out_file.close()
+        per_file_counts.append((out_file_path.name, lines_in_current_file))
+
+    plan['files'] = [{'name': n, 'rows_including_header': c} for n, c in per_file_counts]
+    return plan
+
+# -------------------------
+# Group-aware split
+# -------------------------
+def split_groups(input_path: Path, parts: int, outdir: Path, prefix: str, gzip_out: bool,
+                 group_cols: List[str], required_cols: List[str], dry_run: bool) -> Dict:
+    # First pass: header + group sizes
+    with open_maybe_gzip(input_path, 'rt') as f:
+        header = f.readline()
+        if not header:
+            raise SystemExit("Empty file or missing header")
+        # Verify required columns exist (so downstream enrichment won't fail)
+        check_required_columns(header, required_cols)
+        cols = header.rstrip('\n').split('\t')
+        col_idx = {c: i for i, c in enumerate(cols)}
+        for gc in group_cols:
+            if gc not in col_idx:
+                raise SystemExit(f"--group-by column not found in header: {gc}. Available: {cols}")
+        total_rows = 0
+        group_counts: Dict[Tuple, int] = {}
+        for line in f:
+            total_rows += 1
+            fields = line.rstrip('\n').split('\t')
+            key = tuple(fields[col_idx[c]] for c in group_cols)
+            group_counts[key] = group_counts.get(key, 0) + 1
+    if total_rows == 0:
+        raise SystemExit("No data rows found (only header)")
+
+    # Safeguard: cap parts to min(total_rows, number_of_groups)
+    num_groups = len(group_counts)
+    parts = min(parts, max(1, num_groups))
+
+    # Greedy bin packing: largest groups first to balance rows across parts
+    sorted_groups = sorted(group_counts.items(), key=lambda kv: kv[1], reverse=True)
+    bins = [{'rows': 0, 'groups': []} for _ in range(parts)]
+    for key, gsize in sorted_groups:
+        target = min(range(parts), key=lambda i: bins[i]['rows'])
+        bins[target]['rows'] += gsize
+        bins[target]['groups'].append(key)
+
+    pad = zero_pad_width(parts)
+
+    plan = {
+        'mode': 'group',
+        'parts': parts,
+        'total_rows': total_rows,
+        'num_groups': num_groups,
+        'group_cols': group_cols,
+        'outdir': str(outdir),
+        'prefix': prefix,
+        'files': [{'name': make_out_name(outdir, prefix, i+1, pad, gzip_out).name,
+                   'assigned_groups': len(bins[i]['groups']),
+                   'planned_rows_excluding_header': bins[i]['rows']}
+                  for i in range(parts)]
+    }
+
+    if dry_run:
+        return plan
+
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    # Second pass: route each line to its assigned bin
+    writers = []
+    for i in range(parts):
+        p = make_out_name(outdir, prefix, i+1, pad, gzip_out)
+        fh = open_maybe_gzip(p, 'wt')
+        writers.append({'path': p, 'fh': fh, 'count': 0})
+
+    group_to_bin: Dict[Tuple, int] = {}
+    for i in range(parts):
+        for g in bins[i]['groups']:
+            group_to_bin[g] = i
+
+    with open_maybe_gzip(input_path, 'rt') as f:
+        header = f.readline()
+        for w in writers:
+            w['fh'].write(header)
+            w['count'] = 1
+        cols = header.rstrip('\n').split('\t')
+        col_idx = {c: i for i, c in enumerate(cols)}
+        for line in f:
+            fields = line.rstrip('\n').split('\t')
+            key = tuple(fields[col_idx[c]] for c in group_cols)
+            bin_idx = group_to_bin.get(key)
+            if bin_idx is None:
+                raise SystemExit(f"Internal error: group {key} not assigned to any bin")
+            w = writers[bin_idx]
+            w['fh'].write(line)
+            w['count'] += 1
+
+    # Close writers and collect counts (include assigned_groups)
+    per_file_infos = []
+    for i, w in enumerate(writers):
+        w['fh'].close()
+        per_file_infos.append({
+            'name': w['path'].name,
+            'rows_including_header': w['count'],
+            'assigned_groups': len(bins[i]['groups'])
+        })
+
+    plan['files'] = per_file_infos
+    return plan
+
+# -------------------------
+# Merge helper (concatenate with single header)
+# -------------------------
+def merge_files(pattern: str, output: Path, gzip_out: bool = False) -> Dict:
+    import glob
+    files = sorted(glob.glob(pattern))
+    if not files:
+        raise SystemExit(f"No files matched pattern: {pattern}")
+
+    def read_header(fp: str) -> str:
+        p = Path(fp)
+        with open_maybe_gzip(p, 'rt') as f:
+            hdr = f.readline()
+            if not hdr:
+                raise SystemExit(f"Empty file or missing header: {fp}")
+            return hdr
+
+    main_header = read_header(files[0])
+
+    # Verify all headers match exactly
+    for fp in files[1:]:
+        hdr = read_header(fp)
+        if hdr.rstrip('\n') != main_header.rstrip('\n'):
+            raise SystemExit(f"Header mismatch between {files[0]} and {fp}\n{main_header}\n!=\n{hdr}")
+
+    out_path = output
+    if gzip_out and not str(out_path).endswith('.gz'):
+        out_path = Path(str(out_path) + '.gz')
+
+    with open_maybe_gzip(out_path, 'wt') as out:
+        out.write(main_header)
+        total_lines = 1
+        for fp in files:
+            p = Path(fp)
+            with open_maybe_gzip(p, 'rt') as f:
+                _ = f.readline()  # skip header
+                for line in f:
+                    out.write(line)
+                    total_lines += 1
+
+    return {'output': str(out_path), 'lines_including_header': total_lines, 'merged_files': files}
+
+# -------------------------
+# CLI
+# -------------------------
+def main():
+    ap = argparse.ArgumentParser(description='Robust TSV splitter/merger with safeguards for enrichment workflows')
+    sub = ap.add_subparsers(dest='cmd', required=True)
+
+    sp = sub.add_parser('split', help='Split a large TSV into parts')
+    sp.add_argument('--input', '-i', required=True, help='Input TSV file path (.tsv or .tsv.gz)')
+    sp.add_argument('--parts', '-n', type=int, default=20, help='Number of parts to split into (default: 20)')
+    sp.add_argument('--rows-per-part', type=int, default=None, help='Override rows per part (block mode only)')
+    sp.add_argument('--outdir', '-o', default='splitted_input', help='Output directory (default: splitted_input)')
+    sp.add_argument('--prefix', default='part_', help='Output filename prefix (default: part_)')
+    sp.add_argument('--gzip-out', action='store_true', help='Write gzip-compressed parts (.tsv.gz)')
+    sp.add_argument('--group-by', default='', help='Comma-separated column names to keep rows grouped (e.g., "Gene,Cell type,Tissue")')
+    sp.add_argument('--require-cols', default=','.join(REQUIRED_COLS), help='Comma-separated required columns to verify in header')
+    sp.add_argument('--manifest', default='split_manifest.json', help='Where to write JSON manifest of the split plan/results')
+    sp.add_argument('--dry-run', action='store_true', help='Plan only; do not write files')
+
+    mp = sub.add_parser('merge', help='Concatenate TSVs (one header)')
+    mp.add_argument('--pattern', required=True, help='Glob pattern for input files to merge')
+    mp.add_argument('--output', required=True, help='Output merged file path (.tsv or .tsv.gz)')
+    mp.add_argument('--gzip-out', action='store_true', help='Write gzip-compressed output (adds .gz if missing)')
+
+    args = ap.parse_args()
+
+    if args.cmd == 'split':
+        input_path = Path(args.input)
+        if not input_path.exists():
+            raise SystemExit(f"Input file not found: {input_path}")
+        outdir = Path(args.outdir)
+        required_cols = [c.strip() for c in args.require_cols.split(',') if c.strip()]
+        group_cols = parse_group_by(args.group_by)
+
+        # Choose mode
+        if group_cols:
+            plan = split_groups(input_path, parts=args.parts, outdir=outdir, prefix=args.prefix,
+                                gzip_out=args.gzip_out, group_cols=group_cols,
+                                required_cols=required_cols, dry_run=args.dry_run)
+        else:
+            plan = split_block(input_path, parts=args.parts, outdir=outdir, prefix=args.prefix,
+                               gzip_out=args.gzip_out, rows_per_part_override=args.rows_per_part, dry_run=args.dry_run)
+
+        # Write manifest
+        manifest_path = Path(args.manifest)
+        data = {
+            'input': str(input_path),
+            'mode': plan['mode'],
+            'parts': plan['parts'],
+            'outdir': plan['outdir'],
+            'prefix': plan['prefix'],
+            'total_rows': plan.get('total_rows'),
+            'num_groups': plan.get('num_groups'),
+            'group_cols': plan.get('group_cols'),
+            'files': plan['files']
+        }
+        with manifest_path.open('w', encoding='utf-8') as mf:
+            json.dump(data, mf, indent=2)
+        print(f"Split {'planned' if args.dry_run else 'completed'}: {plan['parts']} parts to '{outdir}'. Manifest: {manifest_path}")
+        for info in plan['files']:
+            name = info['name']
+            rows = info.get('rows_including_header', info.get('planned_rows_excluding_header', 0) + 1)
+            if plan['mode'] == 'group' and 'assigned_groups' in info:
+                print(f"{name}: {rows} lines (groups: {info['assigned_groups']})")
+            else:
+                print(f"{name}: {rows} lines")
+
+    elif args.cmd == 'merge':
+        output = Path(args.output)
+        res = merge_files(args.pattern, output, gzip_out=args.gzip_out)
+        print(f"Merged {len(res['merged_files'])} files into: {res['output']} ({res['lines_including_header']} lines)")
+
+if __name__ == '__main__':
+    main()
+```
+After splitting, you can run the calculating scripts
+
+
+Just like previous efforts, this calculations also has a python script that does the calculations for you
 
 You can run it like following
+
+in addition to running it like sbatch 
 
 enrich_array.sbatch
 ```
