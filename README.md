@@ -14,6 +14,10 @@ https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression
 
 https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression/blob/main/README.md#method-03---enrichment-score-with-more-robust-statistical-backup-systems-to-filter-useful-data
 
+#And finally I have a script that helps to compare the effectiveness between different methods
+
+https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression/blob/main/README.md#comparing-method-effectiveness
+
 #*** FOR ANY OF THESE TO WORK PROPERLY, YOU HAVE TO INSTALL REQUIRED PACKAGES OR LOAD A PYTHON ENVIRONMENT WITH REQUIRED PACKAGES FIRST **
 
 It looks like this on computecanada/alliancecan
