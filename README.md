@@ -2229,6 +2229,39 @@ def main():
 if __name__ == "__main__":
     main()
 ```
+After the calculation is done for different parts, you should merge this to a single output
+```
+python split_tsv_robust.py merge   --pattern "enrich_parts/adjusted_*_filtered_clusters.tsv"   --output enrich_parts/merged_filtered_clusters.tsv
+```
+And then - global enrichment recompute on the merged filtered clusters (to avoid any chunk-wise denominator bias):
+```
+#!/bin/bash
+#SBATCH --job-name=global_enrich
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --time=06:00:00
+#SBATCH --output=logs/global_enrich_%A_%a.out
+#SBATCH --error=logs/global_enrich_%A_%a.err
+#SBATCH --account=def-ben
+
+#SBATCH --mail-user=premacht@mcmaster.ca
+#SBATCH --mail-type=BEGIN
+#SBATCH --mail-type=END
+#SBATCH --mail-type=FAIL
+#SBATCH --mail-type=REQUEUE
+#SBATCH --mail-type=ALL
+
+module load gcc arrow
+module load python
+python -m venv ~/envs/scanpy
+source ~/envs/scanpy/bin/activate
+
+python min_clusters_and_enrichment.py \
+  --clusters enrich_parts/merged_filtered_clusters.tsv \
+  --out-prefix enrich_parts/global_adjusted \
+  --B 100 --cv 0.20 --reldelta 0.10 --rho 0.90 --min-k 2 \
+  --tissue-weighting weighted --pseudocount 0.01
+```
 # Comparing method effectiveness
 Finally I use the following R script to compare the effectiveness of different methods with different variables
 
