@@ -317,671 +317,848 @@ print("Saved top 100 rows to top100_enrichment.tsv")
 Then I wanted to plot this in an interactive way. This allows user to decide how many values to include in the plot (top x amount
 of data points from the previous output). This resulting tool lets the user select different cell types and genes to see the selected data points. In addition, you can export a tsv file with the selected values.
 
+I made a plot maker that can be used unversally, giving it commands to analyze custom values
 You can run this as
 ```
-python plot_interactive.py \
-  -f my_custom_clustor_enrichment.tsv \
-  -o simple_enrichment_with_custom_clustor_number.html \
-  -n 1000 \
-  --log \
-  --self-contained \
-  --initial-zoom 100 \
-  --lang en-CA
+#!/usr/bin/env bash
+set -euo pipefail
+
+args=(
+  --file my_custom_clustor_enrichment.tsv                # REQUIRED: Input data file (TSV/CSV/etc.)
+  --out simple_enrich_c3.html                # Output HTML file name
+  --top 1000                         # Top N rows to plot (default: 100)
+  --dedupe-policy mean              #[max|mean|median|first] to aggregate before plotting. In case thre are duplicate values
+  --log                             # Use log scale on numeric axis
+  # --linear                        # Use linear scale instead (mutually exclusive with --log)
+  # --horizontal                      # Horizontal bars (better for long labels)
+  --self-contained                  # Embed Plotly.js for offline HTML
+  # --log-digits D2                 # Log-axis minor ticks: D1 (all) or D2 (2 & 5)
+  # --lang en-CA                    # HTML lang attribute (default: en)
+  --initial-zoom 100                # Initial number of bars visible on load
+  # --sep $'\t'                     # Field separator (auto-detected if omitted)
+  --x-col "Gene name"                    # Column for X axis (numeric if horizontal)
+  --y-col "Enrichment score"                     # Column for Y axis (categorical if horizontal)
+  --label-col "Gene"              # Explicit label column (optional)
+  # --value-col Score               # Explicit numeric value column (optional)
+  --group-col "Cell type"                # Column for color grouping (legend)
+  --search-col "Gene name"               # Column used for search box
+  --details "Gene" "Gene name" "Cell type" "clusters_used" "Enrichment score" "single_cell_type_gene"  # Extra columns for hover/details/export
+)
+
+# Invoke the Python script with the collected arguments
+python3 universal_plot_maker.py "${args[@]}"
 ```
--f -input_file
+Save this and following python script in the same folder with input csv file and then run it like
+```
+bash universal_plot_maker.py
+```
+following is the python script
 
--o -output file
-
--n -number of datapoints to show in the plot
-
---log -log transforms the enrichment scores to make it easier to view
-
---self-contained -lets the user use this tool offline
-
---initial-zoom -decides the number of data points(bars) to show when you open the tool
-
---lang en-CA -Language
-
---horizontal -plots horizontal instead default plot
-
-following is the python script7
-
-plot_interactive.py
+universal_plot_maker.py
 ```py
+
 #!/usr/bin/env python3
 """
-Interactive gene enrichment plot with filter/search and TSV export.
+Interactive bar chart (table → HTML) with filter/search, details-on-click,
+safe duplicate handling, per-group colors, and TSV export.
 
-- Loads TSV containing gene enrichment results.
-- Builds an interactive Plotly bar chart (log or linear, horizontal or vertical).
-- Injects an HTML UI with:
-  - Cell type filter
-  - Gene search
-  - Reset button
-  - **Export TSV** button (exports filtered view OR selected points)
-- Saves a standards-compliant HTML file (with <!DOCTYPE html>, <html lang="...">, and viewport meta).
+Highlights:
+- ONE bar per (Gene, Cell type) using a combined category internally (no stacking).
+- X-axis tick labels show ONLY the gene name, while categories remain unique (Gene | Cell type).
+- Group dropdown (filter) and per-bar colors by group.
+- Legend hidden by default (use --show-legend to enable).
+- Canonical payload keys: __VAL__ (numeric value), __CAT__ (combined category), __TICK__ (gene-only tick label).
+- Full-row hover: ALL columns from --details shown on hover (server + client).
+- --dedupe-policy pre-collapses duplicates safely and keeps the group column.
 
-Usage example:
-    python test.py \
-      -f all_gene_cell_enrichment_data.tsv \
-      -o interactive_markers_testing.html \
-      -n 1000 \
-      --log \
-      --self-contained \
-      --horizontal \
-      --initial-zoom 100 \
-      --lang en-CA
+Example:
+  python universal_plot_maker.py \
+    --file all_gene_cell_auroc.tsv \
+    --out auroc_plot.html \
+    --x-col "Gene name" \
+    --y-col "AUROC" \
+    --label-col "Gene" \
+    --group-col "Cell type" \
+    --search-col "Gene name" \
+    --top 1000 \
+    --initial-zoom 100 \
+    --dedupe-policy mean \
+    --self-contained
 """
 
 import argparse
 import json
 import re
+import sys
+from typing import Optional, List, Tuple, Dict
+
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 
+# ------------------------------ #
+# Data Loading & Column Resolution
+# ------------------------------ #
+def _infer_sep(path: str, sep_arg: Optional[str]) -> Optional[str]:
+    if sep_arg is not None:
+        return sep_arg
+    lower = path.lower()
+    if lower.endswith(".tsv") or lower.endswith(".tab"):
+        return "\t"
+    if lower.endswith(".csv"):
+        return ","
+    return None
 
-# ---------- Data Loading ----------
-def load_tsv(path: str) -> pd.DataFrame:
-    """
-    Load the TSV file with required columns and prepare 'Label' for plotting.
-    Expects columns:
-      "Gene", "Gene name", "Cell type", "avg_nCPM", "clusters_used",
-      "Enrichment score", "single_cell_type_gene"
-    """
-    df = pd.read_csv(path, sep="\t")
-    # Clean column names
-    df.columns = [c.strip() for c in df.columns]
-    expected = [
-        "Gene",
-        "Gene name",
-        "Cell type",
-        "avg_nCPM",
-        "clusters_used",
-        "Enrichment score",
-        "single_cell_type_gene",
-    ]
-    missing = [c for c in expected if c not in df.columns]
-    if missing:
-        raise ValueError(f"Missing expected columns: {missing}")
-    # Coerce numeric columns
-    for col in ["avg_nCPM", "clusters_used", "Enrichment score"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-    # Label: prefer Gene name, fallback to Gene
-    df["Label"] = df["Gene name"].fillna(df["Gene"])
-    # Drop rows missing critical fields (label/enrichment)
-    df = df.dropna(subset=["Label", "Enrichment score"])
+def load_table(path: str, sep: Optional[str]) -> pd.DataFrame:
+    if sep is None:
+        df = pd.read_csv(path, sep=None, engine="python")
+    else:
+        df = pd.read_csv(path, sep=sep)
+    df.columns = [str(c).strip() for c in df.columns]
+    df = df.loc[:, ~df.columns.duplicated()]
     return df
 
+def resolve_columns(
+    df: pd.DataFrame,
+    x_col: Optional[str],
+    y_col: Optional[str],
+    label_col: Optional[str],
+    value_col: Optional[str],
+    group_col: Optional[str],
+    search_col: Optional[str],
+    orientation: str,
+) -> Tuple[str, str, Optional[str], Optional[str]]:
+    """Resolve label/value/group/search columns; coerce numeric values; drop NA."""
+    def is_num(series) -> bool:
+        return pd.api.types.is_numeric_dtype(series)
 
-# ---------- Figure Building ----------
+    numeric_cols = [c for c in df.columns if is_num(df[c])]
+    text_cols = [c for c in df.columns if not is_num(df[c])]
+
+    # Explicit x/y given
+    if x_col and y_col:
+        x_is_num = is_num(df[x_col])
+        y_is_num = is_num(df[y_col])
+        if orientation == "v":
+            label_col_final = x_col if not x_is_num else (label_col or (text_cols[0] if text_cols else x_col))
+            value_col_final = y_col if y_is_num else (value_col or (numeric_cols[0] if numeric_cols else y_col))
+        else:
+            label_col_final = y_col if not y_is_num else (label_col or (text_cols[0] if text_cols else y_col))
+            value_col_final = x_col if x_is_num else (value_col or (numeric_cols[0] if numeric_cols else x_col))
+    else:
+        # Only y given → treat as numeric value
+        if y_col and (y_col in df.columns):
+            value_col_final = y_col
+        else:
+            value_col_final = (
+                value_col
+                or ("AUROC" if "AUROC" in df.columns else None)
+                or (numeric_cols[0] if numeric_cols else None)
+            )
+        label_col_final = (
+            label_col
+            or ("Gene name" if "Gene name" in df.columns else None)
+            or ("Gene" if "Gene" in df.columns else None)
+            or (text_cols[0] if text_cols else df.columns[0])
+        )
+
+    if value_col_final is None:
+        raise ValueError("Could not infer a numeric value column. Provide --value-col or both --x-col/--y-col.")
+
+    # Prefer common names if present
+    group_col_final = (
+        group_col if (group_col and group_col in df.columns)
+        else ("Cell type" if "Cell type" in df.columns else None)
+        or ("CellType" if "CellType" in df.columns else None)
+    )
+    search_col_final = (
+        search_col if (search_col and search_col in df.columns)
+        else (label_col_final if label_col_final in df.columns else None)
+    )
+
+    # Sanitize numeric values for value column
+    if df[value_col_final].dtype == object:
+        df[value_col_final] = (
+            df[value_col_final]
+            .astype(str).str.strip()
+            .str.replace(",", ".", regex=False)
+            .replace({"NA": None, "N/A": None, "null": None, "None": None, "": None})
+        )
+    df[value_col_final] = pd.to_numeric(df[value_col_final], errors="coerce")
+    df.dropna(subset=[value_col_final], inplace=True)
+    if df.empty or df[value_col_final].notna().sum() == 0:
+        raise ValueError(f"No numeric values found in column '{value_col_final}'.")
+
+    # Ensure labels are usable
+    df[label_col_final] = df[label_col_final].astype(str).fillna("").str.strip()
+    df = df[df[label_col_final] != ""]
+
+    return label_col_final, value_col_final, group_col_final, search_col_final
+
+# ------------------------------ #
+# Duplicate handling (pre-plot)
+# ------------------------------ #
+def dedupe_for_plot(
+    df: pd.DataFrame,
+    label_col: str,
+    value_col: str,
+    group_col: Optional[str],
+    policy: str = "error",
+    keep_cols: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """
+    Collapse duplicates BEFORE plotting to avoid implicit stacking.
+    Keys = (label_col, group_col) if group_col present, else (label_col).
+    policy: "error" | "max" | "mean" | "median" | "first"
+    keep_cols: columns to retain (e.g., --details)
+    """
+    keys = [label_col] + ([group_col] if group_col else [])
+    cols_safe = keys + [value_col]
+    if keep_cols:
+        cols_safe += [c for c in keep_cols if c in df.columns]
+
+    if not keys:
+        return df.loc[:, list(dict.fromkeys(cols_safe))]
+
+    dup_mask = df.duplicated(subset=keys, keep=False)
+    if not dup_mask.any():
+        return df.loc[:, list(dict.fromkeys(cols_safe))]
+
+    if policy == "error":
+        dupe_rows = df.loc[dup_mask, keys + [value_col]].head(10)
+        raise ValueError(
+            f"Duplicate rows for keys {keys} detected. Example duplicates:\n{dupe_rows}\n"
+            f"Use --dedupe-policy [max|mean|median|first] to aggregate before plotting."
+        )
+
+    agg_map = {"max": "max", "mean": "mean", "median": "median", "first": "first"}
+    reducer = agg_map.get(policy, "max")
+
+    # Aggregate values per key; then reattach desired extras from the first occurrence
+    agg_df = (df.groupby(keys, as_index=False).agg(**{value_col: (value_col, reducer)}))
+    if keep_cols:
+        extras = [c for c in keep_cols if c in df.columns and c not in agg_df.columns]
+        if extras:
+            rep = df.drop_duplicates(subset=keys, keep="first")[keys + extras]
+            agg_df = agg_df.merge(rep, on=keys, how="left")
+
+    # Always only safe columns
+    agg_df = agg_df.loc[:, list(dict.fromkeys(cols_safe))]
+
+    # Ensure group_col did not vanish
+    if group_col and group_col not in agg_df.columns:
+        raise ValueError("Group column disappeared during dedupe; aborting to prevent empty traces.")
+
+    return agg_df
+
+# ------------------------------ #
+# Figure Building (single trace; per-bar colors; combined category + gene-only tick labels; full hover)
+# ------------------------------ #
 def build_fig(
     df: pd.DataFrame,
+    label_col_final: str,
+    value_col_final: str,
+    group_col_final: Optional[str],
     top_n: int = 100,
-    use_log: bool = True,
+    use_log: bool = False,
     orientation: str = "v",  # 'v' or 'h'
-    log_dtick: str | None = None,  # "D1" or "D2"
-    initial_zoom: int | None = None,  # initial number of bars to show
-):
+    log_dtick: Optional[str] = None,
+    initial_zoom: Optional[int] = None,
+    label_title: Optional[str] = None,
+    value_title: Optional[str] = None,
+    detail_cols: Optional[List[str]] = None,
+    show_legend: bool = False,  # default: hide legend
+) -> Tuple[go.Figure, Dict]:
     """
-    Build the Plotly figure and construct a JSON payload for client-side filtering/export.
+    Build a single-trace bar chart:
+      - Each bar == one (label, group) combination.
+      - Axis uses "Label | Group" internally, but tick labels show ONLY the label (e.g., Gene).
+      - Colors per bar by group_col_final.
+      - FULL hover shows ALL fields in detail_cols.
     """
-    # Filter out non-positive values for log scale
+    df_work = df
     if use_log:
-        df = df[df["Enrichment score"] > 0]
+        df_work = df_work[df_work[value_col_final] > 0]
 
-    # Sort by enrichment and select top N
-    df_plot = df.sort_values("Enrichment score", ascending=False).head(top_n).copy()
+    if df_work.empty or df_work[value_col_final].notna().sum() == 0:
+        raise ValueError(f"No plottable numeric values found in '{value_col_final}' after cleaning/log filter.")
 
-    # Prepare customdata for click/selection (detailCols order)
-    detail_cols = [
-        "Gene",
-        "Gene name",
-        "Cell type",
-        "avg_nCPM",
-        "clusters_used",
-        "Enrichment score",
-        "single_cell_type_gene",
+    # Combined category for uniqueness, but keep plain label for tick text
+    if group_col_final:
+        combined = (df_work[label_col_final].astype(str).str.strip() + " | " +
+                    df_work[group_col_final].astype(str).str.strip())
+        df_work = df_work.assign(__label_combined__=combined)
+        label_axis_col = "__label_combined__"   # categories
+        tick_text_col = label_col_final         # ticktext (only gene)
+        page_label_title = f"{label_col_final}" # display title uses only label (gene)
+    else:
+        label_axis_col = label_col_final
+        tick_text_col = label_col_final
+        page_label_title = label_col_final
+
+    # Sort by value and select Top N
+    df_plot = df_work.sort_values(value_col_final, ascending=False).head(top_n).copy()
+
+    # Categories and ticktext
+    categories = df_plot[label_axis_col].astype(str).tolist()
+    ticktext = df_plot[tick_text_col].astype(str).tolist()
+
+    # Detail cols
+    default_detail_cols = [
+        label_col_final, (group_col_final or ""), "Gene name", "Tissue", "clusters_used", "median_nCPM",
+        "robust_ratio", value_col_final
     ]
-    customdata = df_plot[detail_cols].values
+    if detail_cols:
+        detail_cols_use = [c for c in detail_cols if c in df_plot.columns]
+    else:
+        detail_cols_use = [c for c in default_detail_cols if c and c in df_plot.columns]
+    required_cols = [label_col_final, value_col_final]
+    if group_col_final:
+        required_cols.append(group_col_final)
+    for rc in required_cols:
+        if rc in df_plot.columns and rc not in detail_cols_use:
+            detail_cols_use.insert(0, rc)
+    seen = set()
+    detail_cols_use = [c for c in detail_cols_use if not (c in seen or seen.add(c))]
 
-    # Stable color mapping by cell type
-    colors = px.colors.qualitative.Safe
-    ctypes = sorted(df_plot["Cell type"].astype(str).unique())
-    cmap = {ct: colors[i % len(colors)] for i, ct in enumerate(ctypes)}
-    bar_colors = df_plot["Cell type"].astype(str).map(cmap)
+    # Color map per group
+    if group_col_final:
+        colors = px.colors.qualitative.Safe
+        ctypes = sorted(df_plot[group_col_final].astype(str).unique())
+        cmap = {ct: colors[i % len(colors)] for i, ct in enumerate(ctypes)}
+        bar_colors = df_plot[group_col_final].astype(str).map(cmap).tolist()
+    else:
+        cmap = {}
+        bar_colors = ["#636EFA"] * len(df_plot)
 
-    # Build bar trace
+    # Values
+    numeric_vals = df_plot[value_col_final].astype(float).tolist()
+
+    # FULL customdata and hovertemplate (list all detail columns)
+    customdata = df_plot[detail_cols_use].values
+    hover_lines = []
     if orientation == "v":
-        x_vals = df_plot["Label"]
-        y_vals = df_plot["Enrichment score"]
-        bar = go.Bar(
-            x=x_vals,
-            y=y_vals,
-            customdata=customdata,
+        hover_lines.append("**%{x}**")
+        hover_lines.append("Value: %{y:.4g}")
+    else:
+        hover_lines.append("**%{y}**")
+        hover_lines.append("Value: %{x:.4g}")
+    for idx, col_name in enumerate(detail_cols_use):
+        hover_lines.append(f"{col_name}: %{{customdata[{idx}]}}")
+    hovertemplate = "<br>".join(hover_lines) + "<extra></extra>"
+
+    # Single trace (no stacking)
+    if orientation == "v":
+        x_vals = df_plot[label_axis_col].astype(str).tolist()  # combined categories
+        y_vals = numeric_vals
+        trace = go.Bar(
+            x=x_vals, y=y_vals,
             marker_color=bar_colors,
-            hovertemplate=(
-                "<b>%{x}</b><br>"
-                "Enrichment: %{y:.2f}<br>"
-                "Cell type: %{customdata[2]}<br>"
-                "avg_nCPM: %{customdata[3]}<br>"
-                "clusters_used: %{customdata[4]}<br>"
-                "<extra></extra>"
-            ),
-            # Enable visual feedback for selection
+            customdata=customdata,          # full row
+            hovertemplate=hovertemplate,    # full hover
             selected={"marker": {"opacity": 1.0}},
             unselected={"marker": {"opacity": 0.5}},
         )
     else:
-        x_vals = df_plot["Enrichment score"]
-        y_vals = df_plot["Label"]
-        bar = go.Bar(
-            x=x_vals,
-            y=y_vals,
-            orientation="h",
-            customdata=customdata,
+        x_vals = numeric_vals
+        y_vals = df_plot[label_axis_col].astype(str).tolist()  # combined categories
+        trace = go.Bar(
+            x=x_vals, y=y_vals, orientation="h",
             marker_color=bar_colors,
-            hovertemplate=(
-                "<b>%{y}</b><br>"
-                "Enrichment: %{x:.2f}<br>"
-                "Cell type: %{customdata[2]}<br>"
-                "avg_nCPM: %{customdata[3]}<br>"
-                "clusters_used: %{customdata[4]}<br>"
-                "<extra></extra>"
-            ),
+            customdata=customdata,          # full row
+            hovertemplate=hovertemplate,    # full hover
             selected={"marker": {"opacity": 1.0}},
             unselected={"marker": {"opacity": 0.5}},
         )
 
-    fig = go.Figure(data=[bar])
+    fig = go.Figure(data=[trace])
 
-    # Layout
+    # Titles
+    label_title = label_title or page_label_title           # show only label (Gene)
+    value_title = value_title or value_col_final
+    page_title = f"{value_title} by {label_title}"
+
     fig.update_layout(
-        title="Gene Enrichment",
-        xaxis_title=("Enrichment score" if orientation == "h" else "Gene name"),
-        yaxis_title=("Gene name" if orientation == "h" else "Enrichment score"),
+        title=page_title,
         template="plotly_white",
         height=700,
         bargap=0.2,
-        margin=dict(l=60, r=30, t=60, b=120),
+        margin=dict(l=80, r=40, t=70, b=130),
         hovermode="closest",
-        legend_title_text="Cell type",
-        dragmode="select",  # Enable box selection by default
+        legend_title_text=(group_col_final or ""),
+        showlegend=show_legend,  # default False
+        dragmode="select",
+        xaxis_title=(value_title if orientation == "h" else label_title),
+        yaxis_title=(label_title if orientation == "h" else value_title),
     )
 
-    # Axes tweaks
     if orientation == "v":
-        fig.update_xaxes(tickangle=-45, automargin=True, categoryorder="array", categoryarray=list(df_plot["Label"]))
+        fig.update_xaxes(
+            title_standoff=10,
+            tickangle=-45,
+            automargin=True,
+            categoryorder="array",
+            categoryarray=categories,   # categories (combined)
+            tickmode="array",
+            tickvals=categories,        # positions: combined
+            ticktext=ticktext,          # labels: ONLY gene
+        )
         if use_log:
-            kwargs = dict(type="log", title="Enrichment score (log scale)")
+            kwargs = dict(type="log", title=value_title + " (log scale)")
             if log_dtick in ("D1", "D2"):
                 kwargs["dtick"] = log_dtick
             fig.update_yaxes(**kwargs)
         else:
-            fig.update_yaxes(title="Enrichment score")
+            fig.update_yaxes(title_standoff=10, automargin=True)
     else:
-        fig.update_yaxes(automargin=True, categoryorder="array", categoryarray=list(df_plot["Label"]))
+        fig.update_yaxes(
+            title_standoff=10,
+            automargin=True,
+            categoryorder="array",
+            categoryarray=categories,   # categories (combined)
+            tickmode="array",
+            tickvals=categories,        # positions: combined
+            ticktext=ticktext,          # labels: ONLY gene
+        )
         if use_log:
-            kwargs = dict(type="log", title="Enrichment score (log scale)")
+            kwargs = dict(type="log", title=value_title + " (log scale)")
             if log_dtick in ("D1", "D2"):
                 kwargs["dtick"] = log_dtick
             fig.update_xaxes(**kwargs)
         else:
-            fig.update_xaxes(title="Enrichment score")
+            fig.update_xaxes(title_standoff=10, automargin=True)
 
-    # Initial zoom (index-based range on category axis)
+    # Initial zoom (category range)
     if initial_zoom is not None:
-        zoom_n = max(1, min(int(initial_zoom), len(df_plot)))
+        zoom_n = max(1, min(int(initial_zoom), len(categories)))
         if orientation == "v":
             fig.update_xaxes(range=[-0.5, zoom_n - 0.5])
         else:
             fig.update_yaxes(range=[-0.5, zoom_n - 0.5])
 
-    # Build JSON payload for reliable client-side filtering/export
-    rows = df_plot[
-        [
-            "Gene",
-            "Gene name",
-            "Cell type",
-            "avg_nCPM",
-            "clusters_used",
-            "Enrichment score",
-            "single_cell_type_gene",
-            "Label",
-        ]
-    ].to_dict(orient="records")
+    # Payload rows: include details + canonical keys for value & category & ticktext(gene)
+    rows = df_plot[detail_cols_use].to_dict(orient="records")
+    cats = df_plot[label_axis_col].astype(str).tolist()
+    ticks = df_plot[tick_text_col].astype(str).tolist()
+    for i, r in enumerate(rows):
+        r["__VAL__"] = numeric_vals[i]   # numeric value used for bars
+        r["__CAT__"] = cats[i]           # combined category used for axis positions
+        r["__TICK__"] = ticks[i]         # ONLY gene used for tick labels
 
     payload = {
         "rows": rows,
-        "colors": cmap,  # cell type -> color
+        "colors": cmap,  # for client-side per-group colors
         "orientation": orientation,
-        "detail_cols": detail_cols,  # authoritative order for export/customdata
-        "label_col": "Label",
-        "enrich_col": "Enrichment score",
+        "detail_cols": detail_cols_use,
+        "label_col": label_col_final,
+        "value_col": value_col_final,
+        "value_key": "__VAL__",
+        "cat_key": "__CAT__",            # canonical combined label key (positions)
+        "tick_key": "__TICK__",          # canonical tick text key (ONLY gene)
+        "group_col": group_col_final,    # may be None
+        "label_title": label_title,
+        "value_title": value_title,
+        "page_title": page_title,
     }
     return fig, payload
 
-
-# ---------- HEAD meta for mobile ----------
-HEAD_SNIPPET = """<meta name="viewport" content="width=device-width, initial-scale=1">"""
-
-
-# ---------- Enhanced HTML (Details + Filters + Search + Export TSV) ----------
-# Raw string to preserve JS regex literals like /\s+/g without needing double backslashes
+# ------------------------------ #
+# Functional UI (Group filter + Search + Export + Details + FULL hover)
+# ------------------------------ #
 DETAILS_SNIPPET = r"""
-<style>
-  #controls {
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-    margin: 12px 0;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-  }
-  #controls label {
-    font-size: 14px;
-    color: #333;
-  }
-  #controls select, #controls input {
-    padding: 6px 8px;
-    font-size: 14px;
-  }
-  #controls button {
-    padding: 6px 10px;
-    font-size: 14px;
-    cursor: pointer;
-  }
-  #count-info {
-    font-size: 13px;
-    color: #666;
-    margin-left: 8px;
-  }
-  #details-panel {
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-    margin-top: 12px;
-    padding: 12px;
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    background: #fafafa;
-    white-space: pre-wrap;
-    font-size: 14px;
-  }
-  #details-panel table {
-    border-collapse: collapse;
-    width: 100%;
-  }
-  #details-panel td {
-    padding: 4px 8px;
-    border-bottom: 1px solid #eee;
-    vertical-align: top;
-  }
-  #details-panel td:first-child {
-    font-weight: 600;
-    color: #333;
-    width: 220px;
-  }
-  .plotly-graph-div { width: 100% !important; }
-</style>
-
-<div id="controls">
-  <label>Cell type:
-    <select id="celltype-filter"><option value="__all__">All cell types</option></select>
-  </label>
-  <label style="margin-left:12px;">Gene search:
-    <input type="text" id="gene-search" placeholder="e.g., LALBA">
-  </label>
-  <button id="reset-filters" title="Clear filters">Reset</button>
-  <button id="export-tsv" title="Export current view as TSV">Export TSV</button>
-  <span id="count-info"></span>
+<div id="controls" style="margin: 0 0 12px 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;">
+  <label for="cellTypeSelect"><strong>Group:</strong></label>
+  <select id="cellTypeSelect" aria-label="Group filter"><option value="__ALL__">All</option></select>
+  <label for="searchBox"><strong>Search:</strong></label>
+  <input id="searchBox" type="text" placeholder="Type to filter..." aria-label="Search by label">
+  <button id="resetBtn" type="button" aria-label="Reset filters">Reset</button>
+  <button id="exportBtn" type="button" aria-label="Export TSV">Export TSV</button>
 </div>
 
-<div id="details-panel"><em>Click a bar to see full row details here. Lasso/box-select points to export only selected.</em></div>
+<div id="rowDetails" style="font-size: 13px; color: #333;">
+  Click a bar to see full row details here. Lasso/box-select points to export only selected.
+</div>
 
-<!-- The Python side will inject a <script id="chart-data" type="application/json">...</script> before this script -->
 <script>
-(function(){
-  // Wait until the Plotly figure exists and is initialized
-  function initOnceReady() {
-    var gd = document.querySelector('div.plotly-graph-div') || document.querySelector('.js-plotly-plot');
-    var dataTag = document.getElementById('chart-data');
-    if (!gd || !gd.data || !gd.data.length || !dataTag) {
-      setTimeout(initOnceReady, 50);
-      return;
-    }
+(function() {
+  try {
+    var NL = String.fromCharCode(10);
+    var TAB = String.fromCharCode(9);
 
-    // Parse embedded JSON payload from Python
-    var payload = {};
-    try {
-      payload = JSON.parse(dataTag.textContent);
-    } catch(e) {
-      console.error("JSON parse error:", e);
-      return;
-    }
+    var payloadEl = document.getElementById('__payload__');
+    var P = payloadEl ? JSON.parse(payloadEl.textContent || '{}') : null;
+    if (!P) return;
 
-    var rows = Array.isArray(payload.rows) ? payload.rows : [];
-    var colors = payload.colors || {};
-    var orientation = payload.orientation || 'v';
-    var detailCols = payload.detail_cols || ["Gene","Gene name","Cell type","avg_nCPM","clusters_used","Enrichment score","single_cell_type_gene"];
-    var labelCol = payload.label_col || "Label";
-    var enrichCol = payload.enrich_col || "Enrichment score";
+    var plotEl = document.querySelector('div.js-plotly-plot');
+    if (!plotEl) return;
 
-    // Controls
-    var sel = document.getElementById('celltype-filter');
-    var searchBox = document.getElementById('gene-search');
-    var resetBtn = document.getElementById('reset-filters');
-    var exportBtn = document.getElementById('export-tsv');
-    var panel = document.getElementById('details-panel');
-    var countInfo = document.getElementById('count-info');
+    var orient = P.orientation; // 'v' or 'h'
+    var LABEL = P.label_col;
+    var VALUE = P.value_col;
+    var VALUE_KEY = P.value_key || '__VAL__';
+    var CAT_KEY = P.cat_key || '__CAT__';
+    var TICK_KEY = P.tick_key || '__TICK__';
+    var GROUP = P.group_col || null;
+    var labelTitle = P.label_title || LABEL;
+    var valueTitle = P.value_title || VALUE;
 
-    // Number formatter for details panel
-    function fmtNumber(val, maxDigits=2) {
-      if (val === null || val === undefined || val === "" || isNaN(val)) return String(val ?? "");
-      var num = Number(val);
-      if (!isFinite(num)) return String(val);
-      return num.toLocaleString('en-US', { maximumFractionDigits: maxDigits });
-    }
+    var selectEl = document.getElementById('cellTypeSelect');
+    var searchEl = document.getElementById('searchBox');
+    var resetEl = document.getElementById('resetBtn');
+    var exportEl = document.getElementById('exportBtn');
+    var detailsEl = document.getElementById('rowDetails');
 
-    // Build base arrays from rows (authoritative source)
-    var N = rows.length;
-
-    // Populate unique cell types into dropdown
-    var cellTypesSet = {};
-    for (var i = 0; i < N; i++) {
-      var ct = rows[i]["Cell type"];
-      if (ct != null) {
-        ct = String(ct).trim();
-        if (ct.length) cellTypesSet[ct] = true;
-      }
-    }
-    var cellTypes = Object.keys(cellTypesSet).sort();
-    cellTypes.forEach(function(ct){
+    // Populate group dropdown from color map keys (unique group values), if present
+    var colorKeys = (P.colors && typeof P.colors === 'object') ? Object.keys(P.colors) : [];
+    for (var i = 0; i < colorKeys.length; i++) {
+      var g = colorKeys[i];
       var opt = document.createElement('option');
-      opt.value = ct;
-      opt.textContent = ct;
-      sel.appendChild(opt);
-    });
-
-    // Details panel render function
-    function renderDetails(customdata) {
-      if (!customdata || !customdata.length) return;
-      var html = "<table>";
-      for (var i = 0; i < detailCols.length; i++) {
-        var key = detailCols[i];
-        var val = customdata[i];
-        if (key === "avg_nCPM" || key === "Enrichment score") {
-          val = fmtNumber(val, 2);
-        }
-        html += "<tr><td>" + key + "</td><td>" + (val === null ? "" : val) + "</td></tr>";
-      }
-      html += "</table>";
-      panel.innerHTML = html;
-      panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      opt.value = g; opt.textContent = g;
+      selectEl.appendChild(opt);
     }
 
-    // Current filtered rows (used for export when no selection)
-    var filteredRows = [];
-    // Current selected rows (built from plotly_selected)
-    var selectedRows = [];
+    var allRows = Array.isArray(P.rows) ? P.rows.slice() : [];
 
-    // Helper: convert rows to TSV using detailCols order
-    function rowsToTSV(rowsArr) {
-      var cols = detailCols.slice();
+    // Selection tracking
+    var selectedLabels = [];
+    plotEl.on('plotly_selected', function(ev) {
+      var pts = (ev && ev.points) ? ev.points : [];
+      selectedLabels = pts.map(function(p){ return orient === 'v' ? p.x : p.y; });
+    });
+    plotEl.on('plotly_deselect', function(){ selectedLabels = []; });
+
+    // Show details on click
+    plotEl.on('plotly_click', function(ev) {
+      try {
+        var p = (ev && ev.points && ev.points[0]) ? ev.points[0] : null;
+        if (!p) return;
+        var cd = p.customdata || [];
+        var cols = P.detail_cols || [];
+        if (!cols.length) {
+          detailsEl.textContent = 'No detail columns configured.';
+          return;
+        }
+        var html = '<table style="border-collapse:collapse;">';
+        for (var i = 0; i < cols.length; i++) {
+          var v = cd[i];
+          var vv = (typeof v === 'number') ? (Number.isFinite(v) ? v.toPrecision(4) : String(v)) : String(v != null ? v : '');
+          html += '<tr><th style="text-align:left;padding:4px 8px;">' + cols[i] + '</th>' +
+                  '<td style="padding:4px 8px;">' + vv + '</td></tr>';
+        }
+        html += '</table>';
+        detailsEl.innerHTML = html;
+      } catch (e) {
+        console.error('click -> details error:', e);
+      }
+    });
+
+    // Build full hover template listing ALL detail columns
+    function makeFullHoverTemplate() {
+      var dcols = P.detail_cols || [];
       var lines = [];
-      // Header
-      lines.push(cols.join('\t'));
-      // Body
-      for (var i = 0; i < rowsArr.length; i++) {
-        var r = rowsArr[i];
-        var out = [];
-        for (var j = 0; j < cols.length; j++) {
-          var key = cols[j];
-          var val = r[key];
-          // Normalize and escape tabs/newlines
-          var s = (val === null || val === undefined) ? '' : String(val);
-          s = s.replace(/\r?\n/g, ' ').replace(/\t/g, ' ');
-          out.push(s);
-        }
-        lines.push(out.join('\t'));
-      }
-      return lines.join('\n');
-    }
-
-    // Trigger a browser download of a given string as a file
-    function downloadTextFile(filename, text) {
-      var blob = new Blob([text], { type: 'text/tab-separated-values;charset=utf-8' });
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(function(){
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 0);
-    }
-
-    // Export button: prefer selected rows if present; otherwise use filtered rows
-    exportBtn.addEventListener('click', function(){
-      var toExport = (selectedRows && selectedRows.length) ? selectedRows : filteredRows;
-      if (!toExport || !toExport.length) {
-        alert('No rows to export. Use filters/search or select points first.');
-        return;
-      }
-      var tsv = rowsToTSV(toExport);
-      // Build a descriptive filename
-      var suffix = [];
-      if (selectedRows && selectedRows.length) suffix.push('selection');
-      var selectedCT = sel.value;
-      var q = (searchBox.value || '').trim();
-      if (selectedCT && selectedCT !== '__all__') suffix.push(selectedCT.replace(/\s+/g, '_'));
-      if (q) suffix.push('q_' + q.replace(/\s+/g, '_'));
-      var fname = 'export' + (suffix.length ? '_' + suffix.join('_') : '') + '.tsv';
-      downloadTextFile(fname, tsv);
-    });
-
-    // Filtering function: update plot + filteredRows cache
-    function applyFilter() {
-      var selectedCT = sel.value;
-      var q = (searchBox.value || "").trim().toLowerCase();
-
-      var fx = [], fy = [], fcd = [], fcol = [];
-      filteredRows = []; // reset cache
-
-      for (var i = 0; i < N; i++) {
-        var row = rows[i];
-        var ct = (row["Cell type"] == null ? "" : String(row["Cell type"]).trim());
-        var geneName = String(row["Gene name"] || "").toLowerCase();
-        var labelLower = String(row[labelCol] || "").toLowerCase();
-        var ctOk = (selectedCT === "__all__") || (selectedCT === ct);
-        var qOk = (!q) || geneName.includes(q) || labelLower.includes(q);
-
-        if (ctOk && qOk) {
-          filteredRows.push(row); // cache for export
-
-          if (orientation === 'h') {
-            fx.push(row[enrichCol]);   // enrichment on x
-            fy.push(row[labelCol]);    // labels on y
-          } else {
-            fx.push(row[labelCol]);    // labels on x
-            fy.push(row[enrichCol]);   // enrichment on y
-          }
-          fcd.push(detailCols.map(function(k){ return row[k]; }));
-          fcol.push(colors[ct] || '#636EFA');
-        }
-      }
-
-      // Restyle robustly
-      var update = { x: [fx], y: [fy], customdata: [fcd], marker: [{ color: fcol }] };
-      Plotly.restyle(gd, update, [0]);
-
-      // Keep category order aligned with filtered labels
-      var relayout = {};
-      if (orientation === 'h') {
-        relayout['yaxis.categoryorder'] = 'array';
-        relayout['yaxis.categoryarray'] = fy;
+      if (orient === 'v') {
+        lines.push("**%{x}**");
+        lines.push("Value: %{y:.4g}");
       } else {
-        relayout['xaxis.categoryorder'] = 'array';
-        relayout['xaxis.categoryarray'] = fx;
+        lines.push("**%{y}**");
+        lines.push("Value: %{x:.4g}");
       }
-      Plotly.relayout(gd, relayout);
-      countInfo.textContent = (fx.length) + " shown of " + N;
-
-      // Clearing selection state: when filter changes, drop previous selection
-      selectedRows = [];
+      for (var i = 0; i < dcols.length; i++) {
+        lines.push(dcols[i] + ": %{customdata[" + i + "]}");
+      }
+      return lines.join("<br>") + "<extra></extra>";
     }
 
-    // Wire filter/search/reset
-    sel.addEventListener('change', applyFilter);
-    searchBox.addEventListener('input', applyFilter);
-    resetBtn.addEventListener('click', function(){
-      sel.value = "__all__";
-      searchBox.value = "";
-      applyFilter();
+    // Render: apply filters (group + search) and rebuild single trace
+    function render() {
+      var term = (searchEl.value || '').toLowerCase().trim();
+      var groupSel = selectEl.value;
+
+      var rows = allRows.filter(function(r){
+        var okGroup = (groupSel === '__ALL__') || !GROUP || (String(r[GROUP]) === groupSel);
+        var hay = String(r[LABEL] || '').toLowerCase();
+        var okSearch = (term === '') || (hay.indexOf(term) !== -1);
+        return okGroup && okSearch;
+      });
+
+      var x = [], y = [], customdata = [], categories = [], ticktext = [], colors = [];
+      var dcols = P.detail_cols || [];
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
+        // ALWAYS use canonical combined label for axis positions
+        var cat = String(r[CAT_KEY] || '');
+        var tick = String(r[TICK_KEY] || '');  // ONLY gene for tick labels
+        var val = (r[VALUE_KEY] != null ? r[VALUE_KEY] : r[VALUE]);
+        if (typeof val === 'string') {
+          var s = val.replace(',', '.'); var vv = parseFloat(s);
+          if (!Number.isNaN(vv)) val = vv;
+        }
+        if (orient === 'v') { x.push(cat); y.push(val); } else { x.push(val); y.push(cat); }
+        categories.push(cat);
+        ticktext.push(tick);
+
+        var barColor = (GROUP && P.colors && P.colors[String(r[GROUP])]) ? P.colors[String(r[GROUP])] : '#636EFA';
+        colors.push(barColor);
+
+        // Push ALL detail columns in original order into customdata
+        var cd = [];
+        for (var j = 0; j < dcols.length; j++) { cd.push(r[dcols[j]]); }
+        customdata.push(cd);
+      }
+
+      var trace = {
+        type: 'bar',
+        orientation: (orient === 'h') ? 'h' : undefined,
+        x: x, y: y,
+        customdata: customdata,
+        marker: { color: colors },
+        selected: { marker: { opacity: 1.0 } },
+        unselected: { marker: { opacity: 0.5 } },
+        hovertemplate: makeFullHoverTemplate(),  // FULL hover after filtering/search
+      };
+
+      var baseLayout = plotEl.layout || {};
+      var baseX = baseLayout.xaxis || {};
+      var baseY = baseLayout.yaxis || {};
+      var layout = {
+        title: baseLayout.title || P.page_title || (valueTitle + " by " + labelTitle),
+        template: baseLayout.template || 'plotly_white',
+        hovermode: baseLayout.hovermode || 'closest',
+        bargap: (typeof baseLayout.bargap !== 'undefined') ? baseLayout.bargap : 0.2,
+        showlegend: false,  // legend hidden
+        dragmode: baseLayout.dragmode || 'select',
+        margin: baseLayout.margin || {l:80, r:40, t:70, b:130},
+        legend: { tracegroupgap: 0 },
+        xaxis: Object.assign({}, baseX, {
+          title: { text: (orient === 'h') ? (valueTitle || VALUE) : (labelTitle || LABEL) },
+          automargin: true,
+          title_standoff: 10,
+          tickangle: (orient === 'v') ? -45 : baseX.tickangle,
+          categoryorder: (orient === 'v') ? 'array' : baseX.categoryorder,
+          categoryarray: (orient === 'v') ? categories : baseX.categoryarray,
+          tickmode: 'array',
+          tickvals: categories,
+          ticktext: ticktext,
+        }),
+        yaxis: Object.assign({}, baseY, {
+          title: { text: (orient === 'h') ? (labelTitle || LABEL) : (valueTitle || VALUE) },
+          automargin: true,
+          title_standoff: 10,
+          categoryorder: (orient === 'h') ? 'array' : baseY.categoryorder,
+          categoryarray: (orient === 'h') ? categories : baseY.categoryarray,
+          tickmode: (orient === 'h') ? 'array' : baseY.tickmode,
+          tickvals: (orient === 'h') ? categories : baseY.tickvals,
+          ticktext: (orient === 'h') ? ticktext : baseY.ticktext,
+        }),
+      };
+
+      Plotly.react(plotEl, [trace], layout);
+    }
+
+    selectEl.addEventListener('change', render);
+    searchEl.addEventListener('input', render);
+    resetEl.addEventListener('click', function(){
+      selectEl.value = '__ALL__';
+      searchEl.value = '';
+      selectedLabels = [];
+      render();
     });
 
-    // Initial count
-    countInfo.textContent = N + " shown of " + N;
+    exportEl.addEventListener('click', function(){
+      // Export TSV (filtered OR selected)
+      var term = (searchEl.value || '').toLowerCase().trim();
+      var groupSel = selectEl.value;
+      var rows = allRows.filter(function(r){
+        var okGroup = (groupSel === '__ALL__') || !GROUP || (String(r[GROUP]) === groupSel);
+        var hay = String(r[LABEL] || '').toLowerCase();
+        var okSearch = (term === '') || (hay.indexOf(term) !== -1);
+        return okGroup && okSearch;
+      });
 
-    // Click → details panel
-    var clickHandler = function(evt) {
-      var e = evt && evt.points ? evt : (evt && evt.detail ? evt.detail : null);
-      if (!e || !e.points || !e.points.length) return;
-      var p = e.points[0];
-      renderDetails(p.customdata);
-    };
-    if (typeof gd.on === 'function') gd.on('plotly_click', clickHandler);
-    else gd.addEventListener('plotly_click', clickHandler);
-
-    // Selection → build selectedRows (reconstruct objects using detailCols)
-    function collectSelectedRows(evt) {
-      selectedRows = [];
-      if (!evt || !evt.points) return;
-      for (var i = 0; i < evt.points.length; i++) {
-        var p = evt.points[i];
-        var cd = p.customdata;
-        if (Array.isArray(cd)) {
-          var obj = {};
-          for (var j = 0; j < detailCols.length; j++) {
-            obj[detailCols[j]] = cd[j];
-          }
-          selectedRows.push(obj);
-        }
+      if (selectedLabels && selectedLabels.length > 0) {
+        var sset = new Set(selectedLabels.map(String));
+        rows = rows.filter(function(r){
+          var cat = String(r[CAT_KEY] || '');
+          return sset.has(cat);
+        });
       }
-    }
-    if (typeof gd.on === 'function') gd.on('plotly_selected', collectSelectedRows);
-    else gd.addEventListener('plotly_selected', collectSelectedRows);
-  }
 
-  // Start readiness check
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initOnceReady);
-  } else {
-    initOnceReady();
+      var cols = P.detail_cols || (rows.length ? Object.keys(rows[0]) : []);
+      var header = cols.join(TAB);
+      var lines = rows.map(function(r){
+        return cols.map(function(c){ return (r[c] != null ? String(r[c]) : ''); }).join(TAB);
+      });
+      var tsv = [header].concat(lines).join(NL);
+      var blob = new Blob([tsv], { type: 'text/tab-separated-values;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'export.tsv';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+
+    // Initial render
+    render();
+  } catch (e) {
+    console.error('UI init error:', e);
   }
 })();
 </script>
 """
 
-
-# ---------- HTML Saving (standards-compliant, embeds JSON payload) ----------
+# ------------------------------ #
+# HTML Saving
+# ------------------------------ #
 def save_html(fig: go.Figure, out_path: str, payload: dict, self_contained: bool = False, lang_code: str = "en"):
-    """
-    Save a robust, standards-compliant HTML:
-    - Ensures <!DOCTYPE html> at the very beginning (No Quirks Mode).
-    - Adds lang="..." on <html>.
-    - Injects viewport meta just after <head>.
-    - Embeds a JSON payload with rows & colors for client-side filtering and export.
-    - Appends DETAILS_SNIPPET before </body> using a callable replacement to avoid backslash parsing.
-    """
     include_js = True if self_contained else "cdn"
     html = fig.to_html(full_html=True, include_plotlyjs=include_js)
 
-    # 1) Ensure <!DOCTYPE html> at the very beginning
     html = html.lstrip(" \ufeff\r\n\t")
-    if not re.match(r"(?is)^<!doctype\s+html>", html):
+    if not html.startswith("<!DOCTYPE html>"):
         html = "<!DOCTYPE html>\n" + html
 
-    # 2) Ensure <html lang="...">
-    if re.search(r"(?is)<html(?:\s[^>]*)?>", html):
+    if re.search(r"(?is)<html[^>]*>", html):
         if not re.search(r"(?is)<html[^>]*\blang\s*=", html):
-            html = re.sub(r"(?is)<html(\s*)>", f'<html lang="{lang_code}">', html, count=1)
+            html = re.sub(r"(?is)<html(\s*)>", f'<html lang="{lang_code}"\\1>', html, count=1)
     else:
-        html = f"<!DOCTYPE html>\n<html lang=\"{lang_code}\">\n{html}\n</html>"
+        html = f'<!DOCTYPE html>\n<html lang="{lang_code}">\n{html}\n</html>'
 
-    # 3) Inject <meta name="viewport"> immediately after <head>
+    head_snippet = (
+        '<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        f'<title>{payload.get("page_title") or ((payload.get("value_title") or "Value") + " by " + (payload.get("label_title") or "Label"))}</title>\n'
+    )
+
     if re.search(r"(?is)<head\s*>", html):
-        html = re.sub(r"(?is)<head\s*>", "<head>\n" + HEAD_SNIPPET + "\n", html, count=1)
+        html = re.sub(r"(?is)<head\s*>", "<head>\n" + head_snippet + "\n", html, count=1)
     else:
-        html = re.sub(
-            r"(?is)(<html[^>]*>)",
-            r"\1\n<head>\n" + HEAD_SNIPPET + "\n</head>\n",
-            html,
-            count=1,
-        )
+        html = re.sub(r"(?is)(<html[^>]*>)", r"\1\n<head>\n" + head_snippet + "\n</head>\n", html, count=1)
 
-    # 4) Embed JSON payload (safe single <script> with application/json)
-    json_str = json.dumps(payload, ensure_ascii=False)
-    data_block = f'<script id="chart-data" type="application/json">{json_str}</script>\n'
+    payload_json = json.dumps(payload, ensure_ascii=False).replace("</script", "<\\/script")
+    data_block = f'<script type="application/json" id="__payload__">{payload_json}</script>\n'
 
-    # Place the data block just before DETAILS_SNIPPET and </body>
-    if re.search(r"(?is)</body\s*>", html):
-        # Use a callable replacement to avoid backslash interpretation in the replacement string
-        html = re.sub(
-            r"(?is)</body\s*>",
-            lambda m: data_block + DETAILS_SNIPPET + "\n</body>",
-            html,
-            count=1,
-        )
+    if re.search(r"(?is)</body>", html):
+        html = re.sub(r"(?is)</body>", data_block + DETAILS_SNIPPET + "\n</body>", html, count=1)
     else:
-        # Ensure a body exists, then append our blocks
-        if not re.search(r"(?is)<body[^>]*>", html):
-            html = re.sub(r"(?is)</head\s*>", "</head>\n<body>\n", html, count=1)
-        html = html + "\n" + data_block + DETAILS_SNIPPET + "\n</body>\n</html>"
+        html = html + "\n" + data_block + DETAILS_SNIPPET + "\n"
 
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)
 
-
-# ---------- CLI ----------
+# ------------------------------ #
+# CLI
+# ------------------------------ #
 def main():
     ap = argparse.ArgumentParser(
-        description="Make interactive gene enrichment chart (TSV → HTML) with details, filters, search, and TSV export"
+        description="Interactive bar chart (table → HTML) with combined categories, gene-only tick labels, per-group colors, full-row hover, details, search, and TSV export."
     )
-    ap.add_argument("--file", "-f", required=True, help="Input TSV file (e.g., all_gene_cell_enrichment_data.tsv)")
+    ap.add_argument("--file", "-f", required=True, help="Input table (TSV/CSV/etc.)")
     ap.add_argument("--out", "-o", default="interactive_markers.html", help="Output HTML file")
-    ap.add_argument("--top", "-n", type=int, default=100, help="Top N genes by enrichment")
-    ap.add_argument("--log", action="store_true", help="Use log scale on enrichment axis")
-    ap.add_argument("--linear", action="store_true", help="Use linear scale on enrichment axis")
-    ap.add_argument("--horizontal", action="store_true", help="Use horizontal bars (better for long labels)")
-    ap.add_argument("--self-contained", action="store_true", help="Embed plotly.js for fully offline HTML")
+    ap.add_argument("--top", "-n", type=int, default=100, help="Top N rows by value column")
+
+    # Scale options
+    ap.add_argument("--log", action="store_true", help="Use log scale on numeric axis")
+    ap.add_argument("--linear", action="store_true", help="Use linear scale on numeric axis")
     ap.add_argument("--log-digits", choices=["D1", "D2"], help="Log-axis minor digits: D1 (all) or D2 (2 & 5)")
+
+    # Orientation
+    ap.add_argument("--horizontal", action="store_true", help="Use horizontal bars")
+
+    # Packaging
+    ap.add_argument("--self-contained", action="store_true", help="Embed plotly.js for fully offline HTML")
     ap.add_argument("--lang", default="en", help="HTML lang attribute (e.g., 'en', 'en-CA')")
+
+    # Initial viewport
     ap.add_argument("--initial-zoom", type=int, default=100, help="Initial number of bars to show on load")
+
+    # CSV/TSV
+    ap.add_argument("--sep", help="Field separator (e.g., '\\t' or ','); otherwise auto-detected")
+
+    # Column flexibility
+    ap.add_argument("--x-col", help="Column to plot on the X axis")
+    ap.add_argument("--y-col", help="Column to plot on the Y axis")
+    ap.add_argument("--label-col", help="Categorical label column")
+    ap.add_argument("--value-col", help="Numeric value column")
+    ap.add_argument("--group-col", help="Grouping column (used for colors and combined categories)")
+    ap.add_argument("--search-col", help="Column used by the search box (defaults to label column)")
+    ap.add_argument("--details", nargs="*", help="Extra columns for hover/details/export")
+
+    # Duplicate handling
+    ap.add_argument("--dedupe-policy", choices=["error", "max", "mean", "median", "first"], default="error",
+                    help="Collapse duplicate (label, group) rows before plotting (default: error).")
+
+    # Legend control (hidden by default)
+    ap.add_argument("--show-legend", action="store_true", help="Show the legend (hidden by default)")
 
     args = ap.parse_args()
 
+    # Scale choice: DEFAULT linear unless --log is provided
     if args.log and args.linear:
         raise SystemExit("Choose either --log or --linear (not both).")
-
-    use_log = True if args.log or (not args.linear) else False
+    use_log = True if args.log else False
     orientation = "h" if args.horizontal else "v"
 
-    df = load_tsv(args.file)
+    # Load and resolve columns
+    df = load_table(args.file, sep=_infer_sep(args.file, args.sep))
+    try:
+        label_col_final, value_col_final, group_col_final, _ = resolve_columns(
+            df,
+            x_col=args.x_col,
+            y_col=args.y_col,
+            label_col=args.label_col,
+            value_col=args.value_col,
+            group_col=args.group_col,
+            search_col=args.search_col,
+            orientation=orientation,
+        )
+    except Exception as e:
+        print(f"[error] {e}", file=sys.stderr)
+        raise SystemExit(1)
+
+    # Dedupe BEFORE plotting
+    try:
+        df = dedupe_for_plot(
+            df,
+            label_col_final,
+            value_col_final,
+            group_col_final,
+            policy=args.dedupe_policy,
+            keep_cols=args.details
+        )
+    except Exception as e:
+        print(f"[error] {e}", file=sys.stderr)
+        raise SystemExit(1)
+
+    if df.empty:
+        raise SystemExit("No rows to plot after dedupe/filter; check --dedupe-policy or input data.")
+
+    # Axis titles
+    label_title = label_col_final
+    value_title = value_col_final
+
+    # Build figure & payload (legend off by default)
     fig, payload = build_fig(
         df,
+        label_col_final=label_col_final,
+        value_col_final=value_col_final,
+        group_col_final=group_col_final,
         top_n=args.top,
         use_log=use_log,
         orientation=orientation,
         log_dtick=args.log_digits,
         initial_zoom=args.initial_zoom,
+        label_title=label_title,
+        value_title=value_title,
+        detail_cols=args.details,
+        show_legend=args.show_legend,
     )
+
     save_html(fig, args.out, payload, self_contained=args.self_contained, lang_code=args.lang)
     print(f"Saved: {args.out}")
 
-
 if __name__ == "__main__":
     main()
+
 ```
 # METHOD 02 - AUROC SCORES
 
