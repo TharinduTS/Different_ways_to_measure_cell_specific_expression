@@ -2470,26 +2470,23 @@ Finally I use the following R script to compare the effectiveness of different m
 
 For this I have 
 
-1) A tsv file with information on known genes that are specific in expression to certain cell types that look like following
+1) A excel(xlsx) file with information on known genes that are specific in expression to certain cell types that look like following
 
-methods_comparison.txt
-```txt
+gene_markers_extended.xlsx
+```xlsx
 Gene	Cell Type (with extra info)	Cell type (for comparison)	Reference	Specificity Score (human)
-MYH7	Cardiomyocytes	cardiomyocytes	"Canonical marker, PanglaoDB"	n/a
-TNNI3	Cardiomyocytes	cardiomyocytes	"PanglaoDB, 100% specificity"	n/a
-TNNT2	Cardiomyocytes	cardiomyocytes	PanglaoDB specificity	n/a
-ALB	Hepatocytes	hepatocytes	Hepatocyte marker article	1
-CYP2E1	Hepatocytes (zone-specific)	hepatocytes	Biocompare hepatocyte zonation	0.575
-GFAP	Astrocytes	astrocytes	Canonical astrocyte marker	0.344
+MYH7	Cardiomyocytes	cardiomyocytes	Canonical marker, PanglaoDB	
+TNNI3	Cardiomyocytes	cardiomyocytes	PanglaoDB, 100% specificity	
+TNNT2	Cardiomyocytes	cardiomyocytes	PanglaoDB specificity	
 ```
 2) Following R script saved in the same directory as methods_comparison.txt
 
 ```R
 
-###############################################################################
+################################################################################
 # Match/No Match -> Excel with Conditional Formatting (All Columns Colored)
 # + Blank row + Percentage row with color scale for newly added export columns
-###############################################################################
+################################################################################
 
 # ---- Optional: Set working directory to script location if in RStudio ----
 if (requireNamespace("rstudioapi", quietly = TRUE)) {
@@ -2502,10 +2499,12 @@ if (requireNamespace("rstudioapi", quietly = TRUE)) {
 
 # ---- Packages ----
 # install.packages("openxlsx")  # Run once if you don't have it
+# install.packages("readxl")    # Run once if you don't have it
 library(openxlsx)
+library(readxl)
 
 # ---- CONFIG: Change these paths if needed ----
-methods_path <- "methods_comparison.txt"           # Tab-delimited methods file
+methods_path <- "gene_markers_extended.xlsx"  # Excel methods file (.xlsx/.xls)
 export_paths <- paste("outputs_to_compare/", list.files("./outputs_to_compare", recursive = TRUE), sep = "")
 out_path     <- "methods_comparison.updated.xlsx"  # Output Excel file
 
@@ -2516,14 +2515,12 @@ options(stringsAsFactors = FALSE)
 normalize_text <- function(x) {
   x2 <- ifelse(is.na(x), "", x)
   x2 <- trimws(x2)
-  x2 <- gsub("\\s+", " ", x2)    # collapse multiple spaces
+  x2 <- gsub("\\s+", " ", x2)  # collapse multiple spaces
   tolower(x2)
 }
-
 mk_key <- function(gene, cell) {
-  paste(normalize_text(gene), normalize_text(cell), sep = "||")
+  paste(normalize_text(gene), normalize_text(cell), sep = "\n")
 }
-
 # Try regex patterns first, then normalized fuzzy matching
 find_col <- function(df, patterns) {
   nms <- names(df)
@@ -2544,7 +2541,6 @@ find_col <- function(df, patterns) {
   }
   return(NULL)
 }
-
 # Sanitize label (column name) derived from filename
 sanitize_label <- function(path) {
   base <- basename(path)
@@ -2554,20 +2550,19 @@ sanitize_label <- function(path) {
   if (lab == "") lab <- "export"
   lab
 }
-
 # Clean carriage returns and whitespace in character columns
 clean_text_columns <- function(df) {
   for (i in seq_along(df)) {
     if (is.character(df[[i]])) {
-      df[[i]] <- trimws(gsub("\r", "", df[[i]]))
+      df[[i]] <- trimws(gsub("\\r", "", df[[i]]))
     }
   }
   df
 }
 
-# ---- Read methods file ----
+# ---- Read methods file (Excel instead of TSV) ----
 methods <- tryCatch(
-  utils::read.delim(methods_path, check.names = FALSE),
+  readxl::read_excel(methods_path, col_names = TRUE),
   error = function(e) stop("Failed to read methods file: ", e$message)
 )
 
@@ -2595,7 +2590,6 @@ for (exp_path in export_paths) {
     utils::read.delim(exp_path, check.names = FALSE),
     error = function(e) stop(sprintf("Failed to read export file '%s': %s", exp_path, e$message))
   )
-  
   # Identify gene & cell type columns in export
   col_gene_export <- find_col(exp_df, c("^gene\\s*name$", "^gene\\s*name\\b", "^gene$"))
   col_cell_export <- find_col(exp_df, c("^cell\\s*type$", "^cell\\s*type\\b", "^cell$"))
@@ -2603,13 +2597,10 @@ for (exp_path in export_paths) {
     stop(sprintf("Required columns not found in export file: %s. Found columns: %s",
                  exp_path, paste(names(exp_df), collapse = ", ")))
   }
-  
   # Build set of keys present in the export
   export_keys <- unique(mk_key(exp_df[[col_gene_export]], exp_df[[col_cell_export]]))
-  
   # Compute Match/No Match vector for methods rows
   result_vec <- ifelse(methods_keys %in% export_keys, "Match", "No Match")
-  
   # Add/Update a column named after the export file
   label <- sanitize_label(exp_path)
   methods[[label]] <- result_vec
@@ -2646,9 +2637,8 @@ for (col_idx in seq_len(n_cols)) {
 }
 
 # ---- Append empty spacer row and percentage row for newly appended columns ----
-
 # Determine which columns were newly appended (export result columns)
-new_cols <- setdiff(names(methods), base_cols)
+new_cols    <- setdiff(names(methods), base_cols)
 new_col_idx <- match(new_cols, names(methods))
 
 if (length(new_col_idx) > 0) {
@@ -2656,7 +2646,7 @@ if (length(new_col_idx) > 0) {
   matches_counts  <- sapply(new_col_idx, function(ci) sum(methods[[ci]] == "Match",   na.rm = TRUE))
   nomatch_counts  <- sapply(new_col_idx, function(ci) sum(methods[[ci]] == "No Match", na.rm = TRUE))
   totals          <- matches_counts + nomatch_counts
-  perc_vals       <- ifelse(totals == 0, NA_real_, matches_counts / totals)  # proportions 0..1
+  perc_vals       <- ifelse(totals == 0, NA_real_, matches_counts / totals) # proportions 0..1
   
   # Row indices:
   # - Data rows occupy 2..(n_rows+1) (row 1 is header).
@@ -2699,8 +2689,7 @@ setColWidths(wb, "Results", cols = 1:n_cols, widths = "auto")
 
 # Save the workbook
 saveWorkbook(wb, out_path, overwrite = TRUE)
-message(sprintf("Wrote Excel file with formatting to: %s", out_path))
-
+message("Processing complete!")
 
 ```
 3) And the output files from previous analysis that looks like following INSIDE A SUBDIRECTORY IN CURRENT WORKING DIRECTORY NAMED "outputs_to_compare"
