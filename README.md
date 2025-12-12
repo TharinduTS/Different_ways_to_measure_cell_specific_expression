@@ -2483,10 +2483,8 @@ TNNT2	Cardiomyocytes	cardiomyocytes	PanglaoDB specificity
 
 ```R
 
-################################################################################
-# Match/No Match -> Excel with Conditional Formatting (All Columns Colored)
+###### Match/No Match -> Excel with Conditional Formatting (All Columns Colored)
 # + Blank row + Percentage row with color scale for newly added export columns
-################################################################################
 
 # ---- Optional: Set working directory to script location if in RStudio ----
 if (requireNamespace("rstudioapi", quietly = TRUE)) {
@@ -2498,15 +2496,17 @@ if (requireNamespace("rstudioapi", quietly = TRUE)) {
 }
 
 # ---- Packages ----
-# install.packages("openxlsx")  # Run once if you don't have it
-# install.packages("readxl")    # Run once if you don't have it
+# install.packages("openxlsx") # Run once if you don't have it
+# install.packages("readxl")   # Run once if you don't have it
 library(openxlsx)
 library(readxl)
 
 # ---- CONFIG: Change these paths if needed ----
-methods_path <- "gene_markers_extended.xlsx"  # Excel methods file (.xlsx/.xls)
-export_paths <- paste("outputs_to_compare/", list.files("./outputs_to_compare", recursive = TRUE), sep = "")
-out_path     <- "methods_comparison.updated.xlsx"  # Output Excel file
+methods_path <- "gene_markers_extended.xlsx" # Excel methods file (.xlsx/.xls)
+export_paths <- paste("outputs_to_compare/",
+                      list.files("./outputs_to_compare", recursive = TRUE),
+                      sep = "")
+out_path     <- "methods_comparison.updated.xlsx" # Output Excel file
 
 # ---- General options ----
 options(stringsAsFactors = FALSE)
@@ -2515,20 +2515,24 @@ options(stringsAsFactors = FALSE)
 normalize_text <- function(x) {
   x2 <- ifelse(is.na(x), "", x)
   x2 <- trimws(x2)
-  x2 <- gsub("\\s+", " ", x2)  # collapse multiple spaces
+  x2 <- gsub("\\s+", " ", x2) # collapse multiple spaces
   tolower(x2)
 }
+
 mk_key <- function(gene, cell) {
   paste(normalize_text(gene), normalize_text(cell), sep = "\n")
 }
+
 # Try regex patterns first, then normalized fuzzy matching
 find_col <- function(df, patterns) {
   nms <- names(df)
+  
   # Regex search
   for (p in patterns) {
     hit <- which(grepl(p, nms, ignore.case = TRUE, perl = TRUE))
     if (length(hit) > 0) return(nms[hit[1]])
   }
+  
   # Fuzzy fallback: lowercase, remove punctuation, collapse spaces
   nms_norm <- tolower(gsub("[^a-z0-9]+", " ", nms))
   nms_norm <- trimws(gsub("\\s+", " ", nms_norm))
@@ -2541,15 +2545,17 @@ find_col <- function(df, patterns) {
   }
   return(NULL)
 }
+
 # Sanitize label (column name) derived from filename
 sanitize_label <- function(path) {
   base <- basename(path)
   base_no_ext <- sub("\\.[^.]+$", "", base)
-  lab <- gsub("[^A-Za-z0-9]+", "_", base_no_ext)  # non-alphanum -> underscore
-  lab <- gsub("^_+|_+$", "", lab)                 # trim boundary underscores
+  lab <- gsub("[^A-Za-z0-9]+", "_", base_no_ext) # non-alphanum -> underscore
+  lab <- gsub("^_+|_+$", "", lab) # trim boundary underscores
   if (lab == "") lab <- "export"
   lab
 }
+
 # Clean carriage returns and whitespace in character columns
 clean_text_columns <- function(df) {
   for (i in seq_along(df)) {
@@ -2581,7 +2587,39 @@ if (is.null(col_gene_methods) || is.null(col_cell_methods)) {
        paste(names(methods), collapse = ", "))
 }
 
-# Build normalized keys for methods rows
+# ========================= NEW: Drop exact duplicates =========================
+# Drop rows where BOTH 'Gene' and 'Cell type (for comparison)' are identical.
+dup_mask <- duplicated(mk_key(methods[[col_gene_methods]], methods[[col_cell_methods]]))
+n_dup <- sum(dup_mask, na.rm = TRUE)
+
+if (n_dup > 0) {
+  # Build a small preview of dropped pairs for the message (up to 5)
+  dropped_pairs <- unique(data.frame(
+    Gene = methods[[col_gene_methods]][dup_mask],
+    `Cell type (for comparison)` = methods[[col_cell_methods]][dup_mask],
+    check.names = FALSE
+  ))
+  preview_n <- min(nrow(dropped_pairs), 5L)
+  preview_txt <- paste(
+    apply(dropped_pairs[seq_len(preview_n), , drop = FALSE], 1, function(r) {
+      sprintf("Gene='%s' | Cell type (for comparison)='%s'", r[1], r[2])
+    }),
+    collapse = "; "
+  )
+  
+  message(sprintf(
+    "Dropped %d duplicate row(s) because 'Gene' and 'Cell type (for comparison)' were duplicated. %s%s",
+    n_dup,
+    if (preview_n > 0) "Examples: " else "",
+    if (preview_n > 0) preview_txt else ""
+  ))
+  
+  # Keep first occurrence; drop the rest
+  methods <- methods[!dup_mask, , drop = FALSE]
+}
+# ==============================================================================
+
+# Build normalized keys for methods rows (on deduplicated data)
 methods_keys <- mk_key(methods[[col_gene_methods]], methods[[col_cell_methods]])
 
 # ---- Process each export file ----
@@ -2590,6 +2628,7 @@ for (exp_path in export_paths) {
     utils::read.delim(exp_path, check.names = FALSE),
     error = function(e) stop(sprintf("Failed to read export file '%s': %s", exp_path, e$message))
   )
+  
   # Identify gene & cell type columns in export
   col_gene_export <- find_col(exp_df, c("^gene\\s*name$", "^gene\\s*name\\b", "^gene$"))
   col_cell_export <- find_col(exp_df, c("^cell\\s*type$", "^cell\\s*type\\b", "^cell$"))
@@ -2597,10 +2636,13 @@ for (exp_path in export_paths) {
     stop(sprintf("Required columns not found in export file: %s. Found columns: %s",
                  exp_path, paste(names(exp_df), collapse = ", ")))
   }
+  
   # Build set of keys present in the export
   export_keys <- unique(mk_key(exp_df[[col_gene_export]], exp_df[[col_cell_export]]))
+  
   # Compute Match/No Match vector for methods rows
   result_vec <- ifelse(methods_keys %in% export_keys, "Match", "No Match")
+  
   # Add/Update a column named after the export file
   label <- sanitize_label(exp_path)
   methods[[label]] <- result_vec
@@ -2622,7 +2664,7 @@ redStyle   <- createStyle(fontColour = "#9C0006", bgFill = "#FFC7CE")
 n_rows <- nrow(methods)
 n_cols <- ncol(methods)
 
-# Apply formatting to rows 2..(n+1) to skip header, across ALL columns
+# Apply formatting to rows 2..(n_rows+1) to skip header, across ALL columns
 for (col_idx in seq_len(n_cols)) {
   # Color cells that CONTAIN "Match" (case-sensitive)
   conditionalFormatting(
@@ -2690,6 +2732,7 @@ setColWidths(wb, "Results", cols = 1:n_cols, widths = "auto")
 # Save the workbook
 saveWorkbook(wb, out_path, overwrite = TRUE)
 message("Processing complete!")
+
 
 ```
 3) And the output files from previous analysis that looks like following INSIDE A SUBDIRECTORY IN CURRENT WORKING DIRECTORY NAMED "outputs_to_compare"
