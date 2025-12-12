@@ -323,40 +323,61 @@ I made a plot maker that can be used unversally, giving it commands to analyze c
 
 I wanted to plot this in an interactive way. This allows user to decide how many values to include in the plot (top x amount of data points from the previous output). This resulting tool lets the user select different cell types and genes to see the selected data points. In addition, you can export a tsv file with the selected values.
 
-You can run this as
+This is the script you need to run universal_plot_maker.py.
+
+run_universal_plot_maker_with_options.sh
 ```
 #!/usr/bin/env bash
+# Usage:
+#   ./run_universal_plot_maker_with_options.sh [overrides...]
+# Example:
+#   ./run_universal_plot_maker_with_options.sh --file simple_enrich_1_clustor.tsv --out simple_enrich_1_clustor_plot.html
+
 set -euo pipefail
 
+# Resolve the directory of this script so we can find the Python file reliably
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+# Default arguments (can be overridden by CLI options appended below)
 args=(
-  --file my_custom_clustor_enrichment.tsv                # REQUIRED: Input data file (TSV/CSV/etc.)
-  --out simple_enrich_c3.html                # Output HTML file name
-  --top 1000                         # Top N rows to plot (default: 100)
-  --dedupe-policy mean              #[max|mean|median|first] to aggregate before plotting. In case thre are duplicate values
-  --log                             # Use log scale on numeric axis
-  # --linear                        # Use linear scale instead (mutually exclusive with --log)
-  # --horizontal                      # Horizontal bars (better for long labels)
-  --self-contained                  # Embed Plotly.js for offline HTML
-  # --log-digits D2                 # Log-axis minor ticks: D1 (all) or D2 (2 & 5)
-  # --lang en-CA                    # HTML lang attribute (default: en)
-  --initial-zoom 100                # Initial number of bars visible on load
-  # --sep $'\t'                     # Field separator (auto-detected if omitted)
-  --x-col "Gene name"                    # Column for X axis (numeric if horizontal)
-  --y-col "Enrichment score"                     # Column for Y axis (categorical if horizontal)
-  --label-col "Gene"              # Explicit label column (optional)
-  # --value-col Score               # Explicit numeric value column (optional)
-  --group-col "Cell type"                # Column for color grouping (legend)
-  --search-col "Gene name"               # Column used for search box
-  --details "Gene" "Gene name" "Cell type" "clusters_used" "Enrichment score" "single_cell_type_gene"  # Extra columns for hover/details/export
+  --file my_custom_clustor_enrichment.tsv          # REQUIRED: Input data file (TSV/CSV/etc.)
+  --out simple_enrich_c3.html                      # Output HTML file name
+  --top 35000                                       # Top N rows to plot (default: 100)
+  --dedupe-policy mean                             # [max|mean|median|first] aggregation
+  --log                                            # Use log scale on numeric axis
+  # --linear                                       # Use linear scale instead (mutually exclusive with --log)
+  # --horizontal                                   # Horizontal bars (better for long labels)
+  --self-contained                                 # Embed Plotly.js for offline HTML
+  # --log-digits D2                                # Log-axis minor ticks: D1 (all) or D2 (2 & 5)
+  # --lang en-CA                                   # HTML lang attribute (default: en)
+  --initial-zoom 100                               # Initial number of bars visible on load
+  # --sep $'\t'                                    # Field separator (auto-detected if omitted)
+  --x-col "Gene name"                              # Column for X axis (numeric if horizontal)
+  --y-col "Enrichment score"                       # Column for Y axis (categorical if horizontal)
+  --label-col "Gene"                               # Explicit label column (optional)
+  # --value-col Score                              # Explicit numeric value column (optional)
+  --group-col "Cell type"                          # Column for color grouping (legend)
+  --search-col "Gene name"                         # Column used for search box
+  --details "Gene" "Gene name" "Cell type" "clusters_used" "Enrichment score" "single_cell_type_gene"  # Extra columns
 )
 
+# Append any CLI overrides so the LAST occurrence of options wins
+args+=( "$@" )
+
 # Invoke the Python script with the collected arguments
-python3 universal_plot_maker.py "${args[@]}"
+python3 "${script_dir}/universal_plot_maker.py" "${args[@]}"
 ```
-Save this and following python script in the same folder with input csv file and then run it like
+Then make it an executeble
 ```
-bash universal_plot_maker.py
+chmod +x run_universal_plot_maker_with_options.sh
 ```
+and then run it changing needed flags. The rest of the flags will be used from run_universal_plot_maker_with_options.sh
+```
+./run_universal_plot_maker_with_options.sh --file simple_enrich_1_clustor.tsv --out simple_enrich_1_clustor_plot.html
+```
+This changes input file and output file keeping the rest from run_universal_plot_maker_with_options.sh
+
+
 following is the python script
 
 universal_plot_maker.py
