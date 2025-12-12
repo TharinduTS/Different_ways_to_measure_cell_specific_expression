@@ -14,6 +14,8 @@ https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression
 
 https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression/blob/main/README.md#method-03---enrichment-score-with-more-robust-statistical-backup-systems-to-filter-useful-data
 
+#I wrote universal_plot_maker.py to make interactive plots with any tsv file changing needed fields 
+
 #And finally I have a script that helps to compare the effectiveness between different methods
 
 https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression/blob/main/README.md#comparing-method-effectiveness
@@ -314,10 +316,11 @@ top100 = agg_df.head(100)
 top100.to_csv("top100_enrichment.tsv", sep="\t", index=False)
 print("Saved top 100 rows to top100_enrichment.tsv")
 ```
-Then I wanted to plot this in an interactive way. This allows user to decide how many values to include in the plot (top x amount
-of data points from the previous output). This resulting tool lets the user select different cell types and genes to see the selected data points. In addition, you can export a tsv file with the selected values.
-
+# Universal interactive plot maker
 I made a plot maker that can be used unversally, giving it commands to analyze custom values
+
+I wanted to plot this in an interactive way. This allows user to decide how many values to include in the plot (top x amount of data points from the previous output). This resulting tool lets the user select different cell types and genes to see the selected data points. In addition, you can export a tsv file with the selected values.
+
 You can run this as
 ```
 #!/usr/bin/env bash
