@@ -16,6 +16,8 @@ https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression
 
 #I wrote universal_plot_maker.py to make interactive plots with any tsv file changing needed fields 
 
+https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression/blob/main/README.md#universal-interactive-plot-maker
+
 #And finally I have a script that helps to compare the effectiveness between different methods
 
 https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression/blob/main/README.md#comparing-method-effectiveness
