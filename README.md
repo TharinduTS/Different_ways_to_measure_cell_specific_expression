@@ -2485,11 +2485,10 @@ GFAP	Astrocytes	astrocytes	Canonical astrocyte marker	0.344
 2) Following R script saved in the same directory as methods_comparison.txt
 
 ```R
-library("rstudioapi") 
-setwd(dirname(getActiveDocumentContext()$path))
 
 ###############################################################################
 # Match/No Match -> Excel with Conditional Formatting (All Columns Colored)
+# + Blank row + Percentage row with color scale for newly added export columns
 ###############################################################################
 
 # ---- Optional: Set working directory to script location if in RStudio ----
@@ -2507,8 +2506,7 @@ library(openxlsx)
 
 # ---- CONFIG: Change these paths if needed ----
 methods_path <- "methods_comparison.txt"           # Tab-delimited methods file
-
-export_paths <- paste("outputs_to_compare/",list.files("./outputs_to_compare",recursive = TRUE),sep = '')                # One or more tab-delimited export files
+export_paths <- paste("outputs_to_compare/", list.files("./outputs_to_compare", recursive = TRUE), sep = "")
 out_path     <- "methods_comparison.updated.xlsx"  # Output Excel file
 
 # ---- General options ----
@@ -2573,6 +2571,9 @@ methods <- tryCatch(
   error = function(e) stop("Failed to read methods file: ", e$message)
 )
 
+# Remember base (original) columns before appending export result columns
+base_cols <- names(methods)
+
 # Identify gene & cell type columns in methods
 col_gene_methods <- find_col(methods, c("^gene$", "^gene\\b", "^gene\\s*name$"))
 col_cell_methods <- find_col(methods, c("^cell\\s*type\\s*\\(.*comparison.*\\)$",
@@ -2632,7 +2633,7 @@ n_cols <- ncol(methods)
 
 # Apply formatting to rows 2..(n+1) to skip header, across ALL columns
 for (col_idx in seq_len(n_cols)) {
-  # Color cells that CONTAIN "Match" (case-sensitive; adjust if you need case-insensitive)
+  # Color cells that CONTAIN "Match" (case-sensitive)
   conditionalFormatting(
     wb, "Results", cols = col_idx, rows = 2:(n_rows + 1),
     type = "contains", rule = "Match", style = greenStyle
@@ -2644,12 +2645,62 @@ for (col_idx in seq_len(n_cols)) {
   )
 }
 
+# ---- Append empty spacer row and percentage row for newly appended columns ----
+
+# Determine which columns were newly appended (export result columns)
+new_cols <- setdiff(names(methods), base_cols)
+new_col_idx <- match(new_cols, names(methods))
+
+if (length(new_col_idx) > 0) {
+  # Compute percentage of 'Match' from total of 'Match' + 'No Match' per new column
+  matches_counts  <- sapply(new_col_idx, function(ci) sum(methods[[ci]] == "Match",   na.rm = TRUE))
+  nomatch_counts  <- sapply(new_col_idx, function(ci) sum(methods[[ci]] == "No Match", na.rm = TRUE))
+  totals          <- matches_counts + nomatch_counts
+  perc_vals       <- ifelse(totals == 0, NA_real_, matches_counts / totals)  # proportions 0..1
+  
+  # Row indices:
+  # - Data rows occupy 2..(n_rows+1) (row 1 is header).
+  # - Blank spacer row is (n_rows + 2).
+  # - Percentage row is (n_rows + 3).
+  blank_row_index <- n_rows + 2
+  perc_row_index  <- n_rows + 3
+  
+  # Write an empty spacer row across all columns using a 1xN matrix (no dimnames)
+  spacer_mat <- matrix("", nrow = 1, ncol = n_cols)
+  writeData(wb, sheet = "Results", x = spacer_mat,
+            startRow = blank_row_index, startCol = 1, colNames = FALSE)
+  
+  # Build percentage row: values only in new columns; others left as NA (blank in Excel)
+  row_vec <- rep(NA_real_, n_cols)
+  row_vec[new_col_idx] <- perc_vals
+  
+  # Write the percentage row as a 1xN matrix (avoids zero-length variable names)
+  perc_mat <- matrix(row_vec, nrow = 1, ncol = n_cols)
+  writeData(wb, sheet = "Results", x = perc_mat,
+            startRow = perc_row_index, startCol = 1, colNames = FALSE)
+  
+  # Format percentage cells (e.g., 0.00%) only on new columns
+  pctStyle <- createStyle(numFmt = "0.00%")
+  addStyle(wb, sheet = "Results", style = pctStyle,
+           rows = perc_row_index, cols = new_col_idx, gridExpand = TRUE)
+  
+  # Apply a 3-color scale to the percentage row (lowest red, mid yellow, highest green)
+  conditionalFormatting(
+    wb, sheet = "Results",
+    cols = new_col_idx,
+    rows = perc_row_index,
+    type = "colorScale",
+    style = c("#F8696B", "#FFEB84", "#63BE7B")
+  )
+}
+
 # Optional: Auto column widths
 setColWidths(wb, "Results", cols = 1:n_cols, widths = "auto")
 
 # Save the workbook
 saveWorkbook(wb, out_path, overwrite = TRUE)
 message(sprintf("Wrote Excel file with formatting to: %s", out_path))
+
 
 ```
 3) And the output files from previous analysis that looks like following INSIDE A SUBDIRECTORY IN CURRENT WORKING DIRECTORY NAMED "outputs_to_compare"
