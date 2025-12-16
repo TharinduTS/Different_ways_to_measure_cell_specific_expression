@@ -3,6 +3,7 @@ This page explains 3 different ways I used to build a tool to measure cell speci
 
 
 #*****************************************************************************************************************************************
+#----------------------------------__________celltype_enrichment_v1_4________-------------------------------------------------------------
 # with the tests so far, celltype_enrichment_v1_4 stands out as the best version so far.
 
 #Link to celltype_enrichment_v1_4
@@ -11,7 +12,7 @@ https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression
 
 #*****************************************************************************************************************************************
 
-Other methods I tried and built this on
+Following are the other methods I tried and built this on
 
 #Method 01 - Simple Enrichment Scores
 
