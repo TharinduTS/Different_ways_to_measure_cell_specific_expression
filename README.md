@@ -5,7 +5,19 @@ with the tests, celltype_enrichment_v1_4 (below) stands out as the best version 
 
 If you want more info on some explanations on celltype_enrichment_v1_4 that are not in it's description, having a look at the section 'Simple Enrichment Scores' might help
 
+#*** FOR ANY OF THESE TO WORK PROPERLY, YOU HAVE TO INSTALL REQUIRED PACKAGES OR LOAD A PYTHON ENVIRONMENT WITH REQUIRED PACKAGES FIRST **
 
+It looks like this on computecanada/alliancecan
+```
+module load gcc arrow
+module load python
+python -m venv ~/envs/scanpy
+source ~/envs/scanpy/bin/activate
+```
+use something like following to install packages if they haven't been installed already
+```
+pip install numpy
+```
 #
 #*****************************************************************************************************************************************
 
@@ -45,19 +57,6 @@ https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression
 
 https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression/blob/main/README.md#comparing-method-effectiveness
 
-#*** FOR ANY OF THESE TO WORK PROPERLY, YOU HAVE TO INSTALL REQUIRED PACKAGES OR LOAD A PYTHON ENVIRONMENT WITH REQUIRED PACKAGES FIRST **
-
-It looks like this on computecanada/alliancecan
-```
-module load gcc arrow
-module load python
-python -m venv ~/envs/scanpy
-source ~/envs/scanpy/bin/activate
-```
-use something like following to install packages if they haven't been installed already
-```
-pip install numpy
-```
 # METHOD 01 - Simple Enrichment Scores 
 Simplest way
 
