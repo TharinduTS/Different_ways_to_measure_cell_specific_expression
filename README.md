@@ -3369,5 +3369,56 @@ Run celltype_enrichment_v1_4 with the runner, overriding needed arguments
 ```
 Then you can plot the results with the universal plotter
 
+https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression/blob/main/README.md#universal-interactive-plot-maker
 
+Save that script and the runner below, make the runner an executable and run it as explained overrriding whatever commands needed
+
+Example usage
+```
+./run_universal_plot_maker_with_options.sh --file simple_enrich_1_clustor.tsv --out simple_enrich_1_clustor_plot.html
+```
+
+run_universal_plot_maker_with_options.sh
+```
+#!/usr/bin/env bash
+# Usage:
+#   ./run_universal_plot_maker_with_options.sh [overrides...]
+# Example:
+#   ./run_universal_plot_maker_with_options.sh --file simple_enrich_1_clustor.tsv --out simple_enrich_1_clustor_plot.html
+
+set -euo pipefail
+
+# Resolve the directory of this script so we can find the Python file reliably
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+# Default arguments (can be overridden by CLI options appended below)
+args=(
+  --file enrichV1_4_3clusters.tsv          # REQUIRED: Input data file (TSV/CSV/etc.)
+  --out enrichV1_4_3clusters.html                      # Output HTML file name
+  --top 35000                                       # Top N rows to plot (default: 100)
+  --dedupe-policy mean                             # [max|mean|median|first] aggregation
+  # --log                                            # Use log scale on numeric axis
+  --linear                                       # Use linear scale instead (mutually exclusive with --log)
+  # --horizontal                                   # Horizontal bars (better for long labels)
+  --self-contained                                 # Embed Plotly.js for offline HTML
+  # --log-digits D2                                # Log-axis minor ticks: D1 (all) or D2 (2 & 5)
+  # --lang en-CA                                   # HTML lang attribute (default: en)
+  --initial-zoom 100                               # Initial number of bars visible on load
+  # --sep $'\t'                                    # Field separator (auto-detected if omitted)
+  --x-col "Gene name"                              # Column for X axis (numeric if horizontal)
+  --y-col "log2_enrichment_penalized"                       # Column for Y axis (categorical if horizontal)
+  --label-col "Gene name"                               # Explicit label column (optional)
+  # --value-col Score                              # Explicit numeric value column (optional)
+  --group-col "Cell type"                          # Column for color grouping (legend)
+  --search-col "Gene name"                         # Column used for search box
+  --details "Gene" "Gene name" "Cell type" "clusters_used" "avg_nCPM" "weight_sum" "specificity_tau" "log2_enrichment" "log2_enrichment_penalized" "Enrichment score" # Extra columns
+)
+
+# Append any CLI overrides so the LAST occurrence of options wins
+args+=( "$@" )
+
+# Invoke the Python script with the collected arguments
+python3 "${script_dir}/universal_plot_maker.py" "${args[@]}"
+``
+```
 
