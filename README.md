@@ -2782,11 +2782,12 @@ python filter_weighted_ncpm.py \
   --output rna_single_cell_cluster_filtered.tsv \    # Path to output TSV
   --threshold 0.10 \                                 # Threshold: abs units (if --mode abs) OR fraction (if --mode pct)
   --mode pct \                                       # Comparison mode: 'pct' (fraction of group weighted mean)
-  --filter-scope group \                             # Filter scope: 'group' drops entire groups exceeding threshold
+  --filter-scope group \                             # Filter scope: 'group' drops entire groups exceeding threshold. You can use 'row' to filter omly offending rows
   --pair-base wrow \                                 # Pairwise base: 'wrow' uses weighted per-row nCPM (default)
   --group-cols Gene "Cell type" \                    # Grouping columns (default is Gene + Cell type)
   --encoding utf-8 \                                 # File encoding for input/output
   --keep-na                                          # Keep rows/groups where variation can't be evaluated (optional)
+  --summary-output rna_single_cell_cluster_summary.tsv  #writes an extra file with only the essential columns
 
 # --- Mutually exclusive / alternative options (comment one in at a time) ---
 
@@ -2799,6 +2800,7 @@ python filter_weighted_ncpm.py \
 # --group-cols Gene "Cell type" Tissue              # Include Tissue in grouping (more granular)
 
 # --encoding utf-16                                 # Use a different file encoding if needed
+
 ```
 
 
