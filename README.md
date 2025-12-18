@@ -2773,6 +2773,46 @@ ENSG00000203970	DEFB110	epididymal principal cells	531.86	5	31273.12245	FALSE
 
 This is an enhanced version of simple enrichment score method. I have introduced things like batch normalization, Computing Yanai's τ, Applying τ penalization etc.
 
+Before that, I realized some extreme, false expression values in some cell clusters messes up the algorithm. Therefore I had to get rid of (Gene*Cell type) combinations with too much variation between their weighted nCPM values
+
+Following are different ways you can use this filtering script
+
+
+#filter_weighted_ncpm-----------------------------------------------------------------------------------------------------------------------------
+
+Compute **weighted nCPM** per group, measure **row-level variation**, and filter rows exceeding a threshold. Designed for TSV inputs with columns:
+`Gene`, `Gene name`, `Tissue`, `Cluster`, `Cell type`, `Read count`, `nCPM`.
+
+### Per-row variation
+- `Deviation_abs = |nCPM_row - weighted_nCPM_group|`
+- `Deviation_pct = Deviation_abs / weighted_nCPM_group` (if weighted_nCPM_group > 0)
+
+## Usage
+
+```bash
+# Absolute deviation threshold (25 nCPM)
+python filter_weighted_ncpm.py --input input.tsv --output out_abs25.tsv --threshold 25 --mode abs
+```
+
+# Percent deviation threshold (10% = 0.10)
+```
+python filter_weighted_ncpm.py --input input.tsv --output out_pct10.tsv --threshold 0.10 --mode pct
+```
+# Keep rows where variation can't be computed (e.g., zero total read count)
+```
+python filter_weighted_ncpm.py --input input.tsv --output out_pct10_keepna.tsv --threshold 0.10 --mode pct --keep-na
+```
+# Custom grouping (Gene + Cell type + Tissue)
+```
+python filter_weighted_ncpm.py --input input.tsv --output out_group3.tsv --threshold 20 --mode abs --group-cols Gene "Cell type" Tissue
+```
+# Specify encoding
+```
+python filter_weighted_ncpm.py --input input.tsv --output out_utf16.tsv --threshold 25 --mode abs --encoding utf-16
+```
+
+#-----------------------------------------------------------------------------------------------------------------------------------------------
+Following is the enrichment script
 
 celltype_enrichment_v1_4.py
 ```py
