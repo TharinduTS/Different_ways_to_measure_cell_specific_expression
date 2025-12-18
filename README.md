@@ -2776,42 +2776,30 @@ This is an enhanced version of simple enrichment score method. I have introduced
 Before that, I realized some extreme, false expression values in some cell clusters messes up the algorithm. Therefore I had to get rid of (Gene*Cell type) combinations with too much variation between their weighted nCPM values
 
 Following are different ways you can use this filtering script
+```
+python filter_weighted_ncpm.py \
+  --input rna_single_cell_cluster.tsv \              # Path to input TSV
+  --output rna_single_cell_cluster_filtered.tsv \    # Path to output TSV
+  --threshold 0.10 \                                 # Threshold: abs units (if --mode abs) OR fraction (if --mode pct)
+  --mode pct \                                       # Comparison mode: 'pct' (fraction of group weighted mean)
+  --filter-scope group \                             # Filter scope: 'group' drops entire groups exceeding threshold
+  --pair-base wrow \                                 # Pairwise base: 'wrow' uses weighted per-row nCPM (default)
+  --group-cols Gene "Cell type" \                    # Grouping columns (default is Gene + Cell type)
+  --encoding utf-8 \                                 # File encoding for input/output
+  --keep-na                                          # Keep rows/groups where variation can't be evaluated (optional)
 
+# --- Mutually exclusive / alternative options (comment one in at a time) ---
 
-#filter_weighted_ncpm-----------------------------------------------------------------------------------------------------------------------------
+# --mode abs                                        # Use absolute variation units (e.g., 25), not percentage
 
-Compute **weighted nCPM** per group, measure **row-level variation**, and filter rows exceeding a threshold. Designed for TSV inputs with columns:
-`Gene`, `Gene name`, `Tissue`, `Cluster`, `Cell type`, `Read count`, `nCPM`.
+# --filter-scope row                                # Drop only offending rows, not entire groups
 
-### Per-row variation
-- `Deviation_abs = |nCPM_row - weighted_nCPM_group|`
-- `Deviation_pct = Deviation_abs / weighted_nCPM_group` (if weighted_nCPM_group > 0)
+# --pair-base row                                   # Use raw nCPM per row for pairwise variation (not weighted)
 
-## Usage
+# --group-cols Gene "Cell type" Tissue              # Include Tissue in grouping (more granular)
 
-```bash
-# Absolute deviation threshold (25 nCPM)
-python filter_weighted_ncpm.py --input input.tsv --output out_abs25.tsv --threshold 25 --mode abs
+# --encoding utf-16                                 # Use a different file encoding if needed
 ```
-
-#Percent deviation threshold (10% = 0.10)
-```
-python filter_weighted_ncpm.py --input input.tsv --output out_pct10.tsv --threshold 0.10 --mode pct
-```
-#Keep rows where variation can't be computed (e.g., zero total read count)
-```
-python filter_weighted_ncpm.py --input input.tsv --output out_pct10_keepna.tsv --threshold 0.10 --mode pct --keep-na
-```
-#Custom grouping (Gene + Cell type + Tissue)
-```
-python filter_weighted_ncpm.py --input input.tsv --output out_group3.tsv --threshold 20 --mode abs --group-cols Gene "Cell type" Tissue
-```
-#Specify encoding
-```
-python filter_weighted_ncpm.py --input input.tsv --output out_utf16.tsv --threshold 25 --mode abs --encoding utf-16
-```
-
-#-----------------------------------------------------------------------------------------------------------------------------------------------
 
 
 Following is the enrichment script
