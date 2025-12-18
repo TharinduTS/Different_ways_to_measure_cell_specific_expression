@@ -2802,7 +2802,11 @@ python filter_weighted_ncpm.py \
 # --encoding utf-16                                 # Use a different file encoding if needed
 
 ```
-
+I am using 20% pct variation
+```
+python filter_weighted_ncpm.py   --input rna_single_cell_cluster.tsv   --output rna_single_cell_cluster_filtered_pct.tsv   --threshold 0.20   --mode pc
+t --summary-output rna_single_cell_cluster_summary.tsv
+```
 
 Following is the enrichment script
 
