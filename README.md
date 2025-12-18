@@ -2794,24 +2794,26 @@ Compute **weighted nCPM** per group, measure **row-level variation**, and filter
 python filter_weighted_ncpm.py --input input.tsv --output out_abs25.tsv --threshold 25 --mode abs
 ```
 
-# Percent deviation threshold (10% = 0.10)
+#Percent deviation threshold (10% = 0.10)
 ```
 python filter_weighted_ncpm.py --input input.tsv --output out_pct10.tsv --threshold 0.10 --mode pct
 ```
-# Keep rows where variation can't be computed (e.g., zero total read count)
+#Keep rows where variation can't be computed (e.g., zero total read count)
 ```
 python filter_weighted_ncpm.py --input input.tsv --output out_pct10_keepna.tsv --threshold 0.10 --mode pct --keep-na
 ```
-# Custom grouping (Gene + Cell type + Tissue)
+#Custom grouping (Gene + Cell type + Tissue)
 ```
 python filter_weighted_ncpm.py --input input.tsv --output out_group3.tsv --threshold 20 --mode abs --group-cols Gene "Cell type" Tissue
 ```
-# Specify encoding
+#Specify encoding
 ```
 python filter_weighted_ncpm.py --input input.tsv --output out_utf16.tsv --threshold 25 --mode abs --encoding utf-16
 ```
 
 #-----------------------------------------------------------------------------------------------------------------------------------------------
+
+
 Following is the enrichment script
 
 celltype_enrichment_v1_4.py
