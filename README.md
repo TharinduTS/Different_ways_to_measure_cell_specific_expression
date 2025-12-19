@@ -3978,7 +3978,7 @@ Save that script and the runner below, make the runner an executable and run it 
 
 Example usage
 ```
-./run_universal_plot_maker_with_options.sh --file simple_enrich_1_clustor.tsv --out simple_enrich_1_clustor_plot.html
+./run_universal_plot_maker_with_options.sh --file enrichV1_4_3clusters.tsv --out enrichV1_4_3clusters.html
 ```
 
 run_universal_plot_maker_with_options.sh
