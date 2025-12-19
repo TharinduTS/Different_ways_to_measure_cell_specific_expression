@@ -2793,7 +2793,8 @@ python filter_weighted_ncpm.py \
   --encoding utf-8 \                   # File encoding (default: utf-8)
   --keep-na \                          # Keep rows where an outlier score can't be computed (optional)
   --summary-output rna_single_cell_cluster_summary.tsv \
-  --summary-source filtered            # Write an extra summary TSV with essential columns (from filtered output)
+  --summary-source filtered \          # Write an extra summary TSV from filtered output
+  --summary-cols Gene "Cell type"      # Choose
 
 
 # --- Alternatives & advanced options (enable ONE per line as needed) ---
@@ -2835,19 +2836,30 @@ python filter_weighted_ncpm.py \
 # --encoding utf-16                    # Use a different file encoding if needed
 
 # 5) Summary file behavior
-# --summary-output PATH                # Writes an extra TSV with essential columns
+# --summary-output PATH                # Writes an extra TSV
 # --summary-source full                # Summary from full dataset (default)
+# --summary-source filtered            # Summary from filtered output
+# --summary-cols Gene "Cell type"      # Choose columns that appear in the summary (custom subset)
+
+# 6) Optional summary group selection (include/exclude specific composite keys)
+# --summary-group-keys "GENE|CELLTYPE" "GENE2|CELLTYPE2"   # Keys must match the order in --group-cols
+# --summary-group-file summary_groups.txt                   # One key per line (supports comments with '#')
+# --summary-group-mode include                              # 'include' keeps only those groups; use 'exclude' to remove them
+
 ```
 Quick reference for flags
 
 --filter-scope group|row: Drop entire groups or only rows that are outliers.
+
 --outlier-method range|median-mad:
 
 range: simple max-difference; requires --threshold and --mode.
+
 median-mad: robust; uses --mad-k (and optional --mad-log). Row only.
 
 
 --mode abs|pct (range method only): Use absolute units or fraction of group mean.
+
 --pair-base row|wrow|alpha|wterm: How per-row values are formed for comparison:
 
 row: nCPM
@@ -2857,27 +2869,512 @@ wterm: nCPM × Read (use with MAD; consider --mad-log)
 
 
 --alpha: 0..1 (only for --pair-base alpha), set to 0.5 as a good starting point.
+
 --mad-k: MAD threshold; typical robust choice 3.0 (lower for stricter).
+
 --mad-log: Apply log1p transform before MAD (helps when values vary widely).
+
 --summary-output: Writes a compact summary TSV.
+
 --summary-source full|filtered: Choose source for summary (default full).
 
 
 I am using following 
 ```
- python filter_weighted_ncpm.py \
+python filter_weighted_ncpm.py \
   --input rna_single_cell_cluster.tsv \
   --output rna_single_cell_cluster_filtered_rows_alpha_mad.tsv \
   --filter-scope row \
   --pair-base alpha \
   --alpha 0.5 \
   --outlier-method median-mad \
-   --mad-k 3.0 \
-  --mad-log \
+  --mad-k 3.0 \
   --group-cols Gene "Cell type" \
   --summary-output rna_single_cell_cluster_summary.tsv \
+  --summary-source filtered \
+  --summary-cols "Gene" "Gene name" "Tissue" "Cell type" "Read count" "nCPM" "Group_variation_pct" \
 ```
+This is the script used
 
+filter_weighted_ncpm.py
+```py
+
+#!/usr/bin/env python3
+"""
+Detect abnormal variation between rows within each group (default: Gene × Cell type),
+using a configurable per-row base value, then filter groups or rows based on either
+range or robust MAD outlier rules. Includes a summary file with optional column and group selection.
+
+Per-row base options (choose with --pair-base):
+  - 'row'   : Row_base = nCPM                                (no read weighting)
+  - 'wrow'  : Row_base = nCPM * (ReadCount / sum(ReadCount)) (full read weighting)
+  - 'alpha' : Row_base = nCPM * (ReadCount^alpha / sum(ReadCount^alpha))  [in-between]
+  - 'wterm' : Row_base = nCPM * ReadCount                    (product for median checks)
+
+Range-based variation (for --outlier-method range):
+  - Group_variation_abs = max(Row_base) - min(Row_base)
+  - Group_variation_pct = Group_variation_abs / mean(Row_base)   (unit-consistent when --mode pct)
+  - Row_max_diff_abs = max(|Row_base - min(Row_base)|, |max(Row_base) - Row_base|)  [row scope]
+  - Row_max_diff_pct = Row_max_diff_abs / mean(Row_base)         [row scope, --mode pct]
+
+Robust MAD-based outliers (for --outlier-method median-mad, row scope only):
+  - Optionally apply log1p scaling to Row_base before MAD with --mad-log
+  - Row_mad_score = |Row_base - median(Row_base)| / MAD(Row_base)
+  - Drop rows with Row_mad_score > --mad-k
+
+Summary:
+  - --summary-cols lets you pick the **columns** in the summary TSV (e.g., Gene "Cell type")
+  - --summary-group-keys / --summary-group-file can include/exclude specific groups (optional)
+
+Progress messages are printed at each major step.
+"""
+
+import argparse
+import sys
+import numpy as np
+import pandas as pd
+from typing import List, Optional, Set
+
+# ---------------------------- Progress logger ----------------------------
+
+def log(msg: str):
+    """Print a progress message and flush immediately."""
+    print(msg, flush=True)
+
+# ---------------------------- Validation ----------------------------
+
+REQUIRED_COLUMNS = [
+    "Gene", "Gene name", "Tissue", "Cluster", "Cell type", "Read count", "nCPM",
+]
+
+def validate_columns(df: pd.DataFrame):
+    missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
+    if missing:
+        raise ValueError(f"Input file is missing required columns: {missing}")
+
+# ---------------------------- Summary group selection ----------------------------
+
+def load_summary_keys(
+    keys_cli: Optional[List[str]],
+    keys_file: Optional[str],
+) -> Optional[Set[str]]:
+    """
+    Build a set of composite group keys from CLI list and/or a file.
+    Each key is expected to be a pipe-delimited string: 'col1|col2|...'
+    Returns None if no keys were provided.
+    """
+    keys: Set[str] = set()
+    if keys_cli:
+        for k in keys_cli:
+            if k and k.strip():
+                keys.add(k.strip())
+    if keys_file:
+        try:
+            with open(keys_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    s = line.strip()
+                    if not s or s.startswith("#"):
+                        continue
+                    keys.add(s)
+        except Exception as e:
+            print(f"ERROR: failed to read summary-group-file '{keys_file}': {e}", file=sys.stderr)
+            sys.exit(1)
+    return keys if keys else None
+
+def build_group_key(df: pd.DataFrame, group_cols: List[str]) -> pd.Series:
+    """Create a pipe-delimited composite key series with the columns in order."""
+    return df[group_cols].astype(str).agg("|".join, axis=1)
+
+# ---------------------------- Metrics computation ----------------------------
+
+def compute_metrics(
+    df: pd.DataFrame,
+    group_cols: List[str],
+    weight_col: str,
+    value_col: str,
+    pair_base: str,       # 'row' | 'wrow' | 'alpha' | 'wterm'
+    alpha: float,         # used only when pair_base == 'alpha'
+    mad_log: bool,        # apply log1p before MAD?
+    # Conditional computation flags:
+    compute_range: bool,
+    compute_range_pct: bool,
+    compute_row_range: bool,  # row-level range diffs (for --filter-scope row & range)
+    compute_mad: bool,
+):
+    """
+    Compute only the metrics needed for this run based on flags.
+
+    Always computes:
+      - Row_base
+
+    Conditionally computes:
+      - Group_variation_abs / Group_variation_pct (range)
+      - Row_max_diff_abs / Row_max_diff_pct (row-level range)
+      - Row_mad_score (median-MAD)
+    """
+    log("➡️ Step: Ensuring numeric types for Read count and nCPM...")
+    df[weight_col] = pd.to_numeric(df[weight_col], errors="coerce")
+    df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
+
+    log(f"➡️ Step: Grouping rows by: {group_cols}")
+    grp = df.groupby(group_cols, dropna=False)
+
+    # -------- Row_base (safe normalization) --------
+    log(f"➡️ Step: Building Row_base using pair-base = '{pair_base}'" + (f" (alpha={alpha})" if pair_base == "alpha" else ""))
+    if pair_base == "row":
+        df["Row_base"] = df[value_col]
+
+    elif pair_base == "wrow":
+        sum_weights = grp[weight_col].transform("sum")
+        w_norm = pd.Series(0.0, index=df.index)
+        nonzero_sum = sum_weights != 0
+        w_norm.loc[nonzero_sum] = (
+            df.loc[nonzero_sum, weight_col] / sum_weights.loc[nonzero_sum]
+        )
+        df["Row_base"] = df[value_col] * w_norm
+
+    elif pair_base == "alpha":
+        df["_w_alpha"] = df[weight_col] ** alpha
+        sum_w_alpha = grp["_w_alpha"].transform("sum")
+        w_norm_alpha = pd.Series(0.0, index=df.index)
+        nonzero_alpha = sum_w_alpha != 0
+        w_norm_alpha.loc[nonzero_alpha] = (
+            df.loc[nonzero_alpha, "_w_alpha"] / sum_w_alpha.loc[nonzero_alpha]
+        )
+        df["Row_base"] = df[value_col] * w_norm_alpha
+
+    elif pair_base == "wterm":
+        df["Row_base"] = df[value_col] * df[weight_col]
+
+    else:
+        raise ValueError(f"Unsupported pair_base: {pair_base}")
+
+    # Compute group statistics only when needed
+    row_base_mean = None
+    min_base = None
+    max_base = None
+
+    if compute_range or compute_row_range:
+        log("➡️ Step: Computing min/max of Row_base within groups (range)...")
+        min_base = grp["Row_base"].transform("min")
+        max_base = grp["Row_base"].transform("max")
+
+    if compute_range_pct or compute_row_range:  # need group mean for pct in either case
+        log("➡️ Step: Computing group mean of Row_base (for % metrics)...")
+        row_base_mean = grp["Row_base"].transform("mean")
+        df["Row_base_group_mean"] = row_base_mean
+
+    # -------- Range-based metrics (group scope) --------
+    if compute_range:
+        log("➡️ Step: Computing group-level range metrics...")
+        df["Group_variation_abs"] = max_base - min_base
+
+        if compute_range_pct:
+            df["Group_variation_pct"] = pd.NA
+            valid_mean = row_base_mean > 0
+            df.loc[valid_mean, "Group_variation_pct"] = (
+                df.loc[valid_mean, "Group_variation_abs"] / df.loc[valid_mean, "Row_base_group_mean"]
+            )
+
+    # -------- Range-based metrics (row scope) --------
+    if compute_row_range:
+        log("➡️ Step: Computing row-level max-diff metrics (range)...")
+        diff_to_min = (df["Row_base"] - min_base).abs()
+        diff_to_max = (max_base - df["Row_base"]).abs()
+        df["Row_max_diff_abs"] = pd.DataFrame({"a": diff_to_min, "b": diff_to_max}).max(axis=1)
+
+        if compute_range_pct:
+            df["Row_max_diff_pct"] = pd.NA
+            valid_mean = row_base_mean > 0
+            df.loc[valid_mean, "Row_max_diff_pct"] = (
+                df.loc[valid_mean, "Row_max_diff_abs"] / df.loc[valid_mean, "Row_base_group_mean"]
+            )
+
+    # -------- Robust MAD-based outlier scores --------
+    if compute_mad:
+        log("➡️ Step: Computing robust MAD outlier scores..." + (" (log1p scaling applied)" if mad_log else ""))
+        base_for_mad = df["Row_base"].copy()
+        if mad_log:
+            base_for_mad = np.log1p(base_for_mad)
+
+        # Build group key
+        group_key = df[group_cols].astype(str).agg("|".join, axis=1)
+
+        # Group-wise median
+        median_base = base_for_mad.groupby(group_key).transform("median")
+
+        # Group-wise MAD that returns NaN for empty or single-valued groups
+        def _mad_series(s: pd.Series) -> float:
+            if len(s) == 0:
+                return np.nan
+            med = s.median()
+            abs_dev = (s - med).abs()
+            mad = abs_dev.median()
+            return np.nan if mad == 0 else mad
+
+        mad_series = base_for_mad.groupby(group_key).transform(_mad_series)
+
+        # Avoid division by zero MAD: score computed only where MAD is non-NaN
+        df["Row_mad_score"] = pd.NA
+        valid_mad = mad_series.notna()
+        df.loc[valid_mad, "Row_mad_score"] = (
+            (base_for_mad.loc[valid_mad] - median_base.loc[valid_mad]).abs() / mad_series.loc[valid_mad]
+        )
+
+    # Cleanup helper cols
+    log("➡️ Step: Cleaning helper columns...")
+    drop_cols = [c for c in ["_w_alpha"] if c in df.columns]
+    if drop_cols:
+        df.drop(columns=drop_cols, inplace=True)
+
+    log("✅ Metrics computation complete.")
+    return df
+
+# ---------------------------- CLI parsing ----------------------------
+
+def parse_args():
+    p = argparse.ArgumentParser(
+        description="Detect abnormal variation between rows within groups and filter output."
+    )
+    p.add_argument("--input", "-i", required=True, help="Path to input TSV.")
+    p.add_argument("--output", "-o", required=True, help="Path to output TSV.")
+    p.add_argument(
+        "--threshold", "-t", required=False, type=float,
+        help="Variation threshold for 'range' method. If --mode abs, in base units; if --mode pct, as fraction (e.g., 0.10)."
+    )
+    p.add_argument(
+        "--mode", "-m", choices=["abs", "pct"], default="abs",
+        help="Comparison mode for 'range' method: 'abs' (absolute) or 'pct' (fraction of Row_base group mean)."
+    )
+    p.add_argument(
+        "--filter-scope", choices=["group", "row"], default="group",
+        help="Drop entire groups ('group') or only offending rows ('row')."
+    )
+    p.add_argument(
+        "--pair-base", choices=["row", "wrow", "alpha", "wterm"], default="alpha",
+        help="Per-row base: 'row' (nCPM), 'wrow' (weighted by read fraction), "
+             "'alpha' (read^alpha normalized), or 'wterm' (nCPM*ReadCount)."
+    )
+    p.add_argument(
+        "--alpha", type=float, default=0.5,
+        help="Exponent for --pair-base alpha (0..1). 0=no weighting; 1=full weighting. Default 0.5."
+    )
+    p.add_argument(
+        "--outlier-method", choices=["range", "median-mad"], default="range",
+        help="Outlier detection method. 'median-mad' is robust and applies to row-level filtering."
+    )
+    p.add_argument(
+        "--mad-k", type=float, default=3.0,
+        help="Threshold k for MAD-based outlier detection (default: 3.0). Rows with Row_mad_score > k are dropped."
+    )
+    p.add_argument(
+        "--mad-log", action="store_true",
+        help="Apply log1p to Row_base before MAD to stabilize heavy tails."
+    )
+    p.add_argument(
+        "--group-cols", nargs="+", default=["Gene", "Cell type"],
+        help="Columns to define groups (default: Gene and Cell type)."
+    )
+    p.add_argument("--encoding", default="utf-8", help="File encoding (default: utf-8).")
+    p.add_argument(
+        "--keep-na", dest="keep_na", action="store_true",
+        help="Keep rows/groups where variation cannot be evaluated (e.g., NA in pct or MAD modes)."
+    )
+    p.add_argument(
+        "--summary-output", "-s", default=None,
+        help="(Optional) Path to write a summary TSV."
+    )
+    p.add_argument(
+        "--summary-source", choices=["full", "filtered"], default="full",
+        help="Source for summary TSV: 'full' dataset (default) or 'filtered' output."
+    )
+    # Column selection for summary
+    p.add_argument(
+        "--summary-cols", nargs="+", default=None,
+        help="Columns to include in the summary TSV (e.g., Gene \"Cell type\" Tissue). "
+             "If omitted, a default set is used."
+    )
+    # Optional group selection for summary (still available)
+    p.add_argument(
+        "--summary-group-keys", nargs="+", default=None,
+        help="Composite group keys to include/exclude in summary (each key = col1|col2|... per --group-cols order)."
+    )
+    p.add_argument(
+        "--summary-group-file", default=None,
+        help="Path to a text file with one composite group key per line (col1|col2|...)."
+    )
+    p.add_argument(
+        "--summary-group-mode", choices=["include", "exclude"], default="include",
+        help="If keys are provided, 'include' keeps only those groups, 'exclude' removes those groups."
+    )
+    return p.parse_args()
+
+# ---------------------------- Main ----------------------------
+
+def main():
+    log("🔧 Parsing command-line arguments...")
+    args = parse_args()
+
+    # Method-specific validations
+    log("🔎 Validating method-specific options...")
+    if args.outlier_method == "median-mad" and args.filter_scope != "row":
+        print("ERROR: --outlier-method median-mad requires --filter-scope row.", file=sys.stderr)
+        sys.exit(1)
+    if args.outlier_method == "range" and args.threshold is None:
+        print("ERROR: --threshold is required when --outlier-method range.", file=sys.stderr)
+        sys.exit(1)
+    if args.pair_base == "alpha" and not (0.0 <= args.alpha <= 1.0):
+        print("ERROR: --alpha must be between 0 and 1.", file=sys.stderr)
+        sys.exit(1)
+
+    # Load
+    log(f"📥 Loading input TSV: {args.input}")
+    try:
+        df = pd.read_csv(args.input, sep="\t", encoding=args.encoding)
+    except Exception as e:
+        print(f"ERROR: failed to read '{args.input}': {e}", file=sys.stderr)
+        sys.exit(1)
+    log(f"📊 Loaded {len(df)} rows, {len(df.columns)} columns.")
+
+    # Validate
+    log("✅ Validating required columns...")
+    try:
+        validate_columns(df)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+    log("✅ Required columns present.")
+
+    # Decide computations needed
+    compute_range = (args.outlier_method == "range")
+    compute_range_pct = compute_range and (args.mode == "pct")
+    compute_row_range = compute_range and (args.filter_scope == "row")
+    compute_mad = (args.outlier_method == "median-mad")
+
+    # Compute metrics (only what's needed)
+    log("🧮 Computing metrics (only those needed for the selected method)...")
+    df = compute_metrics(
+        df=df,
+        group_cols=list(args.group_cols),
+        weight_col="Read count",
+        value_col="nCPM",
+        pair_base=args.pair_base,
+        alpha=args.alpha,
+        mad_log=args.mad_log,
+        compute_range=compute_range,
+        compute_range_pct=compute_range_pct,
+        compute_row_range=compute_row_range,
+        compute_mad=compute_mad,
+    )
+
+    # Build keep mask
+    log(f"⚙️ Building keep mask | Scope={args.filter_scope} | Method={args.outlier_method}...")
+    if args.filter_scope == "group":
+        # Group-level filtering uses range-based variation only
+        comp = df["Group_variation_abs"] if args.mode == "abs" else df["Group_variation_pct"]
+        evaluable = comp.notna()
+        keep_mask = evaluable & (comp <= args.threshold)
+        if args.keep_na:
+            keep_mask = keep_mask | (~evaluable)
+        evaluable_count = int(evaluable.sum())
+        log(f"🔢 Evaluable groups (broadcast to rows): {evaluable_count} rows evaluable.")
+
+    else:  # row-level filtering
+        if args.outlier_method == "median-mad":
+            comp = df["Row_mad_score"]
+            evaluable = comp.notna()
+            keep_mask = evaluable & (comp <= args.mad_k)
+            if args.keep_na:
+                keep_mask = keep_mask | (~evaluable)
+            log(f"🔢 Evaluable rows (MAD): {int(evaluable.sum())} rows evaluable.")
+        else:  # range
+            comp = df["Row_max_diff_abs"] if args.mode == "abs" else df["Row_max_diff_pct"]
+            evaluable = comp.notna()
+            keep_mask = evaluable & (comp <= args.threshold)
+            if args.keep_na:
+                keep_mask = keep_mask | (~evaluable)
+            log(f"🔢 Evaluable rows (range): {int(evaluable.sum())} rows evaluable.")
+
+    out = df.loc[keep_mask].copy()
+    log(f"📉 Filtering applied: kept {len(out)} / {len(df)} rows.")
+
+    # Save filtered output
+    log(f"💾 Writing filtered output to: {args.output}")
+    try:
+        out.to_csv(args.output, sep="\t", index=False, encoding=args.encoding)
+    except Exception as e:
+        print(f"ERROR: failed to write '{args.output}': {e}", file=sys.stderr)
+        sys.exit(1)
+    log("✅ Filtered output written.")
+
+    # Optional separate summary TSV (selected columns + optional group filtering)
+    if args.summary_output:
+        log(f"🧾 Preparing summary TSV: {args.summary_output} (source={args.summary_source})")
+        source_df = df if args.summary_source == "full" else out
+
+        # Determine summary columns
+        if args.summary_cols:
+            summary_cols = list(args.summary_cols)  # user-specified
+            log(f"🧩 Using user-selected summary columns: {summary_cols}")
+        else:
+            summary_cols = [
+                "Gene", "Gene name", "Tissue", "Cluster", "Cell type",
+                "Read count", "nCPM", "Group_variation_pct",
+            ]
+            log(f"🧩 Using default summary columns: {summary_cols}")
+
+        # Ensure requested columns exist; if Group_variation_pct requested but not present, create NA
+        if "Group_variation_pct" in summary_cols and "Group_variation_pct" not in source_df.columns:
+            log("ℹ️ 'Group_variation_pct' requested but not computed; adding as NA to summary source.")
+            source_df = source_df.copy()
+            source_df["Group_variation_pct"] = pd.NA
+
+        missing = [c for c in summary_cols if c not in source_df.columns]
+        if missing:
+            print(f"ERROR: summary source missing columns: {missing}", file=sys.stderr)
+            sys.exit(1)
+
+        # Optional group selection for summary
+        summary_keys = load_summary_keys(args.summary_group_keys, args.summary_group_file)
+        if summary_keys is not None:
+            log(f"🔎 Applying summary group {args.summary_group_mode}: {len(summary_keys)} key(s)")
+            group_key_series = build_group_key(source_df, list(args.group_cols))
+            if args.summary_group_mode == "include":
+                mask_summary = group_key_series.isin(summary_keys)
+            else:  # exclude
+                mask_summary = ~group_key_series.isin(summary_keys)
+            source_df = source_df.loc[mask_summary]
+
+        # Write summary
+        try:
+            source_df.loc[:, summary_cols].to_csv(
+                args.summary_output, sep="\t", index=False, encoding=args.encoding
+            )
+            log(f"✅ Summary file written: {args.summary_output}")
+        except Exception as e:
+            print(f"ERROR: failed to write summary file '{args.summary_output}': {e}", file=sys.stderr)
+            sys.exit(1)
+
+    # Console summary
+    total = len(df)
+    kept = len(out)
+    dropped = total - kept
+    log("📣 Run complete.")
+    log(f"• Grouping columns: {args.group_cols}")
+    log(f"• Pair base: {args.pair_base} (alpha={args.alpha if args.pair_base=='alpha' else 'n/a'})")
+    log(f"• Scope: {args.filter_scope}")
+    if args.outlier_method == "range":
+        log(f"• Outlier method: range | Mode: {args.mode} | Threshold: {args.threshold}")
+    else:
+        log(f"• Outlier method: median-mad | MAD-k: {args.mad_k} | MAD-log: {args.mad_log}")
+    log(f"• Rows kept: {kept}/{total} (dropped: {dropped})")
+    log(f"• Output: {args.output}")
+    if args.summary_output:
+        log(f"• Summary: {args.summary_output} (source: {args.summary_source})")
+
+if __name__ == "__main__":
+    main()
+```
 Following is the enrichment script
 
 celltype_enrichment_v1_4.py
