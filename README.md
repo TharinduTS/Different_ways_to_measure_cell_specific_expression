@@ -2892,7 +2892,7 @@ python filter_weighted_ncpm.py \
   --group-cols Gene "Cell type" \
   --summary-output rna_single_cell_cluster_summary.tsv \
   --summary-source filtered \
-  --summary-cols "Gene" "Gene name" "Tissue" "Cell type" "Read count" "nCPM" "Group_variation_pct" \
+  --summary-cols "Gene" "Gene name" "Tissue" "Cell type" "Read count" "nCPM" "Row_mad_score" \
 ```
 This is the script used
 
@@ -3965,7 +3965,7 @@ save this along with celltype_enrichment_v1_4.py and run it like following overr
 Run celltype_enrichment_v1_4 with the runner, overriding needed arguments
 ```bash
 ./run_celltype_enrichment_v1_4.sh \
-  --input-file rna_single_cell_cluster.tsv \
+  --input-file rna_single_cell_cluster_filtered_rows_alpha_mad.tsv \
   --output-file enrichV1_4_3clusters.tsv \
   --min-clusters 3 \
   --specificity-mode penalize \
