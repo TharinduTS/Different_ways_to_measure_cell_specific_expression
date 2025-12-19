@@ -2777,35 +2777,105 @@ Before that, I realized some extreme, false expression values in some cell clust
 
 Following are different ways you can use this filtering script
 ```
+
+# --- Primary example: row-level robust outlier removal with in-between weighting ---
+
 python filter_weighted_ncpm.py \
-  --input rna_single_cell_cluster.tsv \              # Path to input TSV
-  --output rna_single_cell_cluster_filtered.tsv \    # Path to output TSV
-  --threshold 0.10 \                                 # Threshold: abs units (if --mode abs) OR fraction (if --mode pct)
-  --mode pct \                                       # Comparison mode: 'pct' (fraction of group weighted mean)
-  --filter-scope group \                             # Filter scope: 'group' drops entire groups exceeding threshold. You can use 'row' to filter omly offending rows
-  --pair-base wrow \                                 # Pairwise base: 'wrow' uses weighted per-row nCPM (default)
-  --group-cols Gene "Cell type" \                    # Grouping columns (default is Gene + Cell type)
-  --encoding utf-8 \                                 # File encoding for input/output
-  --keep-na                                          # Keep rows/groups where variation can't be evaluated (optional)
-  --summary-output rna_single_cell_cluster_summary.tsv  #writes an extra file with only the essential columns
+  --input rna_single_cell_cluster.tsv \
+  --output rna_single_cell_cluster_filtered.tsv \
+  --filter-scope row \                 # Drop only offending rows (not whole groups)
+  --outlier-method median-mad \        # Robust detection: Median Absolute Deviation (MAD)
+  --mad-k 3.0 \                        # MAD threshold (typical: 3.0; lower -> stricter)
+  --mad-log \                          # Apply log1p before MAD (stabilizes heavy tails; optional)
+  --pair-base alpha \                  # Use in-between weighting: ReadCount^alpha normalized
+  --alpha 0.5 \                        # Alpha in [0..1]; 0=raw nCPM, 1=full weighting; 0.5 is a good compromise
+  --group-cols Gene "Cell type" \      # Group definition (default: Gene + Cell type)
+  --encoding utf-8 \                   # File encoding (default: utf-8)
+  --keep-na \                          # Keep rows where an outlier score can't be computed (optional)
+  --summary-output rna_single_cell_cluster_summary.tsv \
+  --summary-source filtered            # Write an extra summary TSV with essential columns (from filtered output)
 
-# --- Mutually exclusive / alternative options (comment one in at a time) ---
 
-# --mode abs                                        # Use absolute variation units (e.g., 25), not percentage
+# --- Alternatives & advanced options (enable ONE per line as needed) ---
 
-# --filter-scope row                                # Drop only offending rows, not entire groups
+# 1) Range-based filtering (not robust): use absolute or percent thresholds
+#    NOTE: Requires --threshold and --mode; ignores --mad-* flags
+# python filter_weighted_ncpm.py \
+#   --input rna_single_cell_cluster.tsv \
+#   --output rna_single_cell_cluster_filtered_range.tsv \
+#   --filter-scope row \               # Or 'group' to drop entire groups
+#   --outlier-method range \
+#   --threshold 0.10 \                 # If --mode pct: fraction of Row_base group mean (e.g., 0.10 = 10%)
+#   --mode pct \                       # 'pct' or 'abs' (abs uses Row_base units)
+#   --pair-base wrow \                 # Weighted per-row nCPM (read fraction weighting)
+#   --group-cols Gene "Cell type" \
+#   --summary-output rna_single_cell_cluster_summary.tsv
 
-# --pair-base row                                   # Use raw nCPM per row for pairwise variation (not weighted)
+# 2) Pair-base choices (choose ONE; affects how per-row values are compared)
+# --pair-base row                      # Row_base = nCPM (no read weighting)
+# --pair-base wrow                     # Row_base = nCPM * (ReadCount / sum(ReadCount)) (full weighting)
+# --pair-base alpha --alpha 0.3        # In-between weighting; tune alpha (e.g., 0.3–0.7)
+# --pair-base wterm                    # Row_base = nCPM * ReadCount (product; useful with MAD, often with --mad-log)
 
-# --group-cols Gene "Cell type" Tissue              # Include Tissue in grouping (more granular)
+# 3) Group-level filtering (drop whole groups that exceed variation threshold)
+#    NOTE: Works only with --outlier-method range (+ --threshold/--mode)
+# python filter_weighted_ncpm.py \
+#   --input rna_single_cell_cluster.tsv \
+#   --output rna_single_cell_cluster_filtered_groups.tsv \
+#   --filter-scope group \
+#   --outlier-method range \
+#   --threshold 0.10 \
+#   --mode pct \
+#   --pair-base wrow \
+#   --group-cols Gene "Cell type" \
+#   --summary-output rna_single_cell_cluster_summary.tsv \
+#   --summary-source full              # Summary based on full dataset (default)
 
-# --encoding utf-16                                 # Use a different file encoding if needed
+# 4) Encoding alternatives
+# --encoding utf-16                    # Use a different file encoding if needed
 
+# 5) Summary file behavior
+# --summary-output PATH                # Writes an extra TSV with essential columns
+# --summary-source full                # Summary from full dataset (default)
 ```
-I am using 10% pct variation and only dropping abnormal rows
+Quick reference for flags
+
+--filter-scope group|row: Drop entire groups or only rows that are outliers.
+--outlier-method range|median-mad:
+
+range: simple max-difference; requires --threshold and --mode.
+median-mad: robust; uses --mad-k (and optional --mad-log). Row only.
+
+
+--mode abs|pct (range method only): Use absolute units or fraction of group mean.
+--pair-base row|wrow|alpha|wterm: How per-row values are formed for comparison:
+
+row: nCPM
+wrow: nCPM × (Read / sum(Read))
+alpha: nCPM × (Read^α / sum(Read^α)) → recommended compromise
+wterm: nCPM × Read (use with MAD; consider --mad-log)
+
+
+--alpha: 0..1 (only for --pair-base alpha), set to 0.5 as a good starting point.
+--mad-k: MAD threshold; typical robust choice 3.0 (lower for stricter).
+--mad-log: Apply log1p transform before MAD (helps when values vary widely).
+--summary-output: Writes a compact summary TSV.
+--summary-source full|filtered: Choose source for summary (default full).
+
+
+I am using following 
 ```
- python filter_weighted_ncpm.py   --input rna_single_cell_cluster.tsv   --output rna_single_cell_cluster_filtered_pct.tsv   --threshold 0.10   --mode pc
-t --summary-output rna_single_cell_cluster_summary.tsv --filter-scope row
+ python filter_weighted_ncpm.py \
+  --input rna_single_cell_cluster.tsv \
+  --output rna_single_cell_cluster_filtered_rows_alpha_mad.tsv \
+  --filter-scope row \
+  --pair-base alpha \
+  --alpha 0.5 \
+  --outlier-method median-mad \
+   --mad-k 3.0 \
+  --mad-log \
+  --group-cols Gene "Cell type" \
+  --summary-output rna_single_cell_cluster_summary.tsv \
 ```
 
 Following is the enrichment script
