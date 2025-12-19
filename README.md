@@ -3836,7 +3836,7 @@ def main():
     single_cell_rows = agg_df[agg_df["single_cell_type_gene"].fillna(False)].copy()
     if not single_cell_rows.empty:
         n_genes_single = single_cell_rows[args.gene_col].nunique()
-        print(f"\033[32mFound {n_genes_single} gene(s) expressed in exactly one cell type.\033[0m")
+        print(f"\033[32mFound {n_genes_single} gene(s) expressed in exactly one cell type- according to raw data.\033[0m")
         single_cell_rows.to_csv("single_cell_type_gene_rows.tsv", sep="\t", index=False)
     else:
         print("\033[33mNo genes were found that are only expressed in one cell type.\033[0m")
