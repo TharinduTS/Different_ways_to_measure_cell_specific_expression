@@ -4495,12 +4495,4 @@ Inside each group, the script computes:
 ```image
 <img width="1536" height="1024" alt="Designer (1)" src="https://github.com/user-attachments/assets/8445c493-0707-4804-8b8c-81c2f663c095" />
 ```
-Weight = sqrt(read count) normalized within the group
-This is intermediate between:
-
---alpha 0  → equal weighting
---alpha 1  → full read‐fraction weighting
-
-This step does not involve the median.
-It only creates the values used later in the MAD calculation.
 
