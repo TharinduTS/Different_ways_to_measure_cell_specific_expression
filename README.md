@@ -4659,7 +4659,7 @@ Penalizes enrichment by multiplying by τ:
 
 <img width="336" height="48" alt="punished_enrichment" src="https://github.com/user-attachments/assets/b82eb861-5a24-4450-8e96-cfb09b07c48b" />
 
-#---------------------Why I Used Each Parameter and Value-----------------------------------------------------
+#---------------------Why I Used Each Parameter and Value in celltype Enrichment-----------------------------------------------------
 
 Below is the command I used for v1.4, with explanations for each flag.
 
@@ -4834,3 +4834,94 @@ Apply τ penalization → specificity‑aware ranking (broad genes down‑weight
 Apply median scaling per cell type → reduces per‑type scale biases.
 Export overall and per‑cell‑type top lists → practical discovery workflow.
 
+#---------------------Why I Used Each Parameter and Value in celltype Enrichment-----------------------------------------------------
+
+# 3 Estimate Cell Type Counts
+My goal in this final stage is to convert the output of the enrichment pipeline into a per–cell‑type abundance estimate that is driven purely by τ (specificity) and expression, without reintroducing noise from enrichment ratios or cross‑cell‑type comparisons.
+
+The script estimate_celltype_counts.py takes a table with:
+
+gene-wise cell‑type–level expression (avg_nCPM)
+gene specificity (specificity_tau)
+the gene and cell‑type identifiers
+and optionally an auto‑thresholding rule
+
+and produces a cell‑type–level “M estimate” (a simple, interpretable intensity / abundance score).
+This step is intentionally minimalistic: it relies on clean, well‑filtered inputs (from v1.4 + MAD filtering + ≥3 clusters) and uses only τ and expression to produce a stable, low‑noise estimate of cell‑type contribution.
+
+Following is the command I used 
+
+```bash
+
+python estimate_celltype_counts.py \
+  --in enrichV1_4_3clusters.tsv \
+  --out enrichV1_4_3clusters_tau_only.tsv \
+  --expr-col avg_nCPM \
+  --tau-col specificity_tau \
+  --gene-col Gene \
+  --celltype-col "Cell type" \
+  --auto-threshold none \
+  --estimate-col M_est_int \
+  --summary-out tau_only_metrics.tsv \
+  --sep $'\t'
+```
+Method Overview
+The script reads a gene × cell‑type matrix produced by celltype_enrichment_v1_4.py and performs a τ‑weighted expression summarization to estimate total “support” for each cell type.
+Conceptually, for each cell type:
+
+<img width="289" height="76" alt="cell_type_eq_1" src="https://github.com/user-attachments/assets/c4189abd-be7a-4425-9a2b-c28b3a5dc51f" />
+
+Where:
+
+Expression = column you specify with --expr-col, here avg_nCPM
+τ (specificity_tau) = how cell‑type‑specific the gene is
+Genes with high τ and high expression contribute more
+Broad-expression genes (low τ) contribute almost nothing
+
+This produces a monotonic, interpretable “intensity” score per cell type.
+
+#---------------------Why I Used Each Parameter and Value in estimate cell type counts---------------------------
+
+--in enrichV1_4_3clusters.tsv
+Input is the final filtered + weighted + τ‑computed table from your earlier steps:
+
+MAD outlier filtered
+Min clusters ≥ 3
+Weighted aggregation
+τ calculated
+Enrichment (and possibly penalized enrichment) computed
+
+This ensures the estimator is operating only on clean, biologically meaningful rows.
+
+--out enrichV1_4_3clusters_tau_only.tsv
+Output file containing the final per-gene and per–cell‑type τ‑weighted expression result, including the estimate column.
+
+--expr-col avg_nCPM
+The expression measure used for counting.
+
+--tau-col specificity_tau
+This tells the script which column holds the Yanai τ values computed earlier.
+
+--gene-col Gene
+--celltype-col "Cell type"
+These indicate the primary grouping axes.
+
+--auto-threshold none
+Some workflows use an automatic τ threshold or expression cutoff to decide which genes count as “marker genes.”
+
+--estimate-col M_est_int
+This sets the name of the output column that receives the final intensity estimate.
+
+This concludes the calculation pipeline steps. The output looks like following.
+
+enrichV1_4_3clusters_tau_only.tsv
+```txt
+Gene name       Cell type       avg_nCPM        weight_sum      clusters_used   specificity_tau Enrichment score        log2_enrichment Enrichment score (tau penalized)        log2_enrichment_penalized estimated_celltypes
+HBB     erythrocytes    9958769.228729423       10201191        5       0.9999996674470712      3006132.425535792       21.51947713328759       3006131.425837649       21.51947665351505       1.0
+HBA1    erythrocytes    2185955.932262765       2245374 5       0.9999988842076049      895856.7745921403       19.77290857379298       895855.7750019641       19.772906964043923      1.0
+HBA2    erythrocytes    2776903.1050906186      2880033 5       0.999998716688298       779015.312208697        19.571292160400837      779014.3124892307       19.571290308972216      1.0
+ALAS2   erythrocytes    26050.97032670184       15733   4       0.9999808431565218      52096.276641722056      15.66889264528784       52095.27864150464       15.668865007540028      1.0
+HBD     erythrocytes    38966.38362062339       26019   4       0.9999766204873576      42725.5923661472        15.382812873739422      42724.59346262033       15.382779143838178      1.0
+HBM     erythrocytes    17559.518422190205      13880   4       0.999970601125774       33949.14433588315       15.051087592371893      33948.146269258745      15.051045178138372      1.0
+```
+After this I simply used 'universal plot maker' script I wrote before to visualize this
