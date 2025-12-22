@@ -31,6 +31,11 @@ https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression
 
 #*****************************************************************************************************************************************
 
+I have following section explaining theories and why I selected different parameters
+
+https://github.com/TharinduTS/Different_ways_to_measure_cell_specific_expression/blob/main/README.md#reasons-behind-methods-and-parameters
+
+
 #
 #
 #
