@@ -4481,34 +4481,27 @@ python filter_weighted_ncpm.py \
 ```
 And following explains what these parameters mean.
 
-```
---filter-scope row
-Meaning:
-Filtering is applied per row group, where each group corresponds to all clusters of a specific (Gene × Cell type).
 
-Why:
-The goal is to remove unstable gene–cell-type pairs, not entire genes or cell types.
-Row‑group filtering isolates precisely the combinations we care about.
+1. Grouping: What counts as a “Gene × Cell type” pair?
+The script groups rows using:All clusters belonging to the same (Gene, Cell type) form one group.
+Filtering decisions are computed within these groups.
 
+```bash
 --group-cols Gene "Cell type"
-Meaning:
-Defines that rows sharing the same Gene and Cell type belong to the same group.
-
-Why:
-Cluster variation must be measured within each specific gene × cell type pair.
-
---pair-base alpha and --alpha 0.5
-Meaning:
-This defines how the central expression estimate is computed before variation is measured.
-
-pair-base = alpha
-→ use an alpha–trimmed statistic (a robust central tendency)
-alpha = 0.5
-→ take the median, because a 50% trim effectively removes all influence of outliers.
-
-Why:
-For small cluster counts, the mean can be heavily skewed by one noisy cluster.
-The median is far more robust and ensures the “typical” cluster value is representative.
-In short:
-α = 0.5 = median, the safest and most stable central measure for skewed cluster data.
 ```
+2. How Row_base is built (controlled by --pair-base alpha and --alpha 0.5)
+Inside each group, the script computes:
+wi=(ReadCounti)α∑j∈group(ReadCountj)αw_i = \frac{(\text{ReadCount}_i)^{\alpha}}
+          {\sum_{j \in \text{group}} (\text{ReadCount}_j)^{\alpha}}wi​=∑j∈group​(ReadCountj​)α(ReadCounti​)α​
+Row_basei=nCPMi×wi\text{Row\_base}_i = \text{nCPM}_i \times w_iRow_basei​=nCPMi​×wi​
+For my run (--alpha 0.5):
+
+Weight = sqrt(read count) normalized within the group
+This is intermediate between:
+
+--alpha 0  → equal weighting
+--alpha 1  → full read‐fraction weighting
+
+This step does not involve the median.
+It only creates the values used later in the MAD calculation.
+
