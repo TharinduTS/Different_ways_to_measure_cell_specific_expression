@@ -4791,7 +4791,7 @@ Keeps rows with any non‑zero avg_nCPM; avoids discarding potential on/off sign
 
 --treat-nan-as-zero (commented)
 If enabled, this would treat NaNs as zeros when deciding “no expression” genes to drop.
-You left it off to avoid conflating missing values with true zeros.
+I left it off to avoid conflating missing values with true zeros.
 
 Enrichment computation & safeguards
 
