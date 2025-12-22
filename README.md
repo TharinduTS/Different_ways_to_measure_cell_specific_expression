@@ -4626,7 +4626,7 @@ the “+ ε” (epsilon) is simply a tiny positive constant added to avoid tak
 
 #3. τ (Tau) Specificity Computation
 
-Cell‑type specificity matters. A gene expressed everywhere (even at medium levels) should not rank above a gene sharply specific to one cell type. Otherwise I found genes that are not highly cell type specific getting ranked higher just because they had a very high level of gene expression even though they were also expressed in other cell types
+Cell‑type specificity matters. A gene expressed everywhere (even at medium levels) should not rank above a gene sharply specific to one cell type. Otherwise I found genes that are not highly cell type specific getting ranked higher just because they had a very high level of gene expression in one cell type, even though they were also expressed in other cell types
 
 τ ranges from 0 (broad expression) to 1 (highly specific).
 For a gene with expression vector xxx across cell types:
