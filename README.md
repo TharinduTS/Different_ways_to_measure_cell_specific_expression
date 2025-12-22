@@ -4502,7 +4502,7 @@ Filtering decisions are computed within these groups.
 #2. How Row_base is built (controlled by --pair-base alpha and --alpha 0.5)*
 
 These rows contain both 'Read Count' and 'nCPM'.
-Therefore I can't use row values for filteration as it might be biased towards rows with a higher number of read counts. I can control the weight I have towards this by controlling alpha in the following equation. If alpha=0, there is no affect from the weighted values, if alpha is 1, it uses full read‐fraction weighting. I used alpha value 0.5 to only filter out extreme values.
+Therefore I can't use raw values for filteration as it might be biased towards rows with a higher number of read counts. I can control the weight I have towards this by controlling alpha in the following equation. If alpha=0, there is no affect from the weighted values, if alpha is 1, it uses full read‐fraction weighting. I used alpha value 0.5 to only filter out extreme values.
 
 Inside each group, the script computes:
 
