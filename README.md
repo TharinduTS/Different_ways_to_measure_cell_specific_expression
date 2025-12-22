@@ -4576,11 +4576,11 @@ Additional top‑N exports for exploration
 
 This makes v1.4 more biologically meaningful and more resilient to noisy clusters, broad‑expression genes, and cell‑type imbalance.
 
-Dataset Used - I am using the filtered output file from the previous step here
+#***Dataset Used - I am using the filtered output file from the previous filtering step here****
 
 The method works directly on:
 ```
-ene | Gene name | Cell type | Cluster | Read count | nCPM
+Gene | Gene name | Cell type | Cluster | Read count | nCPM
 ```
 These are the Human Protein Atlas single‑cell clusters, each representing multiple replicates belonging to the same cell type.
 
