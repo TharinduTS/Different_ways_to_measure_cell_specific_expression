@@ -4897,7 +4897,11 @@ Conceptually, for each cell type:
 
 Where:
 
-Expression = column you specify with --expr-col, here avg_nCPM
+Expression = column you specify with --expr-col, 
+
+here avg_nCPM
+
+
 τ (specificity_tau) = how cell‑type‑specific the gene is
 Genes with high τ and high expression contribute more
 Broad-expression genes (low τ) contribute almost nothing
