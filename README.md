@@ -4629,7 +4629,7 @@ the “+ ε” (epsilon) is simply a tiny positive constant added to avoid tak
 Cell‑type specificity matters. A gene expressed everywhere (even at medium levels) should not rank above a gene sharply specific to one cell type. Otherwise I found genes that are not highly cell type specific getting ranked higher just because they had a very high level of gene expression in one cell type, even though they were also expressed in other cell types
 
 τ ranges from 0 (broad expression) to 1 (highly specific).
-For a gene with expression vector xxx across cell types:
+For a gene with expression vector x across cell types:
 
 <img width="225" height="64" alt="tau" src="https://github.com/user-attachments/assets/0acf6d13-bb04-4e24-97a0-e9b7fba91dbd" />
 
