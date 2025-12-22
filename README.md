@@ -4481,6 +4481,7 @@ python filter_weighted_ncpm.py \
 ```
 And following explains what these parameters mean.
 
+```
 --filter-scope row
 Meaning:
 Filtering is applied per row group, where each group corresponds to all clusters of a specific (Gene × Cell type).
@@ -4488,3 +4489,26 @@ Filtering is applied per row group, where each group corresponds to all clusters
 Why:
 The goal is to remove unstable gene–cell-type pairs, not entire genes or cell types.
 Row‑group filtering isolates precisely the combinations we care about.
+
+--group-cols Gene "Cell type"
+Meaning:
+Defines that rows sharing the same Gene and Cell type belong to the same group.
+
+Why:
+Cluster variation must be measured within each specific gene × cell type pair.
+
+--pair-base alpha and --alpha 0.5
+Meaning:
+This defines how the central expression estimate is computed before variation is measured.
+
+pair-base = alpha
+→ use an alpha–trimmed statistic (a robust central tendency)
+alpha = 0.5
+→ take the median, because a 50% trim effectively removes all influence of outliers.
+
+Why:
+For small cluster counts, the mean can be heavily skewed by one noisy cluster.
+The median is far more robust and ensures the “typical” cluster value is representative.
+In short:
+α = 0.5 = median, the safest and most stable central measure for skewed cluster data.
+```
