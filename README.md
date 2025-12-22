@@ -4524,3 +4524,29 @@ A row is kept only if:
 <img width="86" height="40" alt="z_limit" src="https://github.com/user-attachments/assets/17c288c1-ca93-4248-bb5d-7ee112101f6e" />
 
 #***This is a process of fine tuning and we may have to change these values later****
+
+5. Summary file (--summary-source filtered)
+the summary file contains only rows that survived filtering.
+```
+"Gene" "Gene name" "Tissue" "Cell type" "Read count" "nCPM" "Row_mad_score"
+```
+6. Final interpretation
+This filtering process removes clusters whose weighted nCPM values deviate excessively from the group median after applying α‑weighted read count scaling. The combination:
+
+--pair-base alpha
+--alpha 0.5
+--outlier-method median-mad
+--mad-k 3.0
+--filter-scope row
+
+results in a robust, row-level outlier detection method that:
+
+Computes stable, group-wise expression values (Row_base) via sqrt(read-count) weighting
+Measures variation from the group median
+Removes rows with unusually large deviation (MAD > 3)
+Outputs only the consistent (Gene × Cell type × cluster) rows
+
+7. Exact mathematical pipeline (final overview)
+
+<img width="533" height="356" alt="filtering_summary" src="https://github.com/user-attachments/assets/2d6d1c6b-4f46-4507-b3f2-6f663e53c71d" />
+
