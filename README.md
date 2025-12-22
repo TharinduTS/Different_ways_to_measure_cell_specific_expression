@@ -4724,10 +4724,13 @@ So the effective configuration was the baseline above, plus these overrides:
 
 --input-file rna_single_cell_cluster_filtered_rows_alpha_mad.tsv
 (use the post‑filter table from the MAD outlier step)
+
 --output-file enrichV1_4_3clusters.tsv
 (custom output file name)
+
 --min-clusters 3
 (stricter replication per (Gene × Cell type) than the baseline 2)
+
 --specificity-mode penalize
 (kept from baseline; explicitly reiterated by your override)
 
@@ -4787,7 +4790,7 @@ Requires at least 2 entries per gene across cell types for a valid enrichment ca
 Adds a small constant to stabilize denominators (and optionally numerator if --pseudocount-to-numerator were enabled).
 This works together with --min-background to keep ratios numerically well‑behaved.
 
-# --clip-max 100 (commented)
+--clip-max 100 (commented)
 If enabled, would cap extreme enrichment ratios; you left it off to retain full dynamic range.
 
 --sort-by "log2_enrichment_penalized"
