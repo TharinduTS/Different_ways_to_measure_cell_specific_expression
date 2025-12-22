@@ -4762,14 +4762,72 @@ Replication guard
 --min-clusters 3 (override)
 Requires at least 3 clusters for a (Gene × Cell type) row to be kept in average nCPM. This prevents wrongfully assigned rows by Human Protein Atlas pipeline messing up my algorithm output
 
-Pre‑enrichment cleanup
-
+#Pre‑enrichment cleanup
 
 --min-expr-threshold 0.00
 Keeps rows with any non‑zero avg_nCPM; avoids discarding potential on/off signals prematurely.
 
-
-# --treat-nan-as-zero (commented)
+--treat-nan-as-zero (commented)
 If enabled, this would treat NaNs as zeros when deciding “no expression” genes to drop.
 You left it off to avoid conflating missing values with true zeros.
+
+Enrichment computation & safeguards
+
+--min-background 1e-3
+Floors the denominator to avoid division by tiny values → prevents extreme ratios caused by near‑zero background.
+
+--min-expression 0.001
+Sets a minimal numerator expression required to compute enrichment.
+Helps suppress ratios driven by numerical noise.
+
+--min-count 2
+Requires at least 2 entries per gene across cell types for a valid enrichment calculation.
+
+--pseudocount 0.001
+Adds a small constant to stabilize denominators (and optionally numerator if --pseudocount-to-numerator were enabled).
+This works together with --min-background to keep ratios numerically well‑behaved.
+
+# --clip-max 100 (commented)
+If enabled, would cap extreme enrichment ratios; you left it off to retain full dynamic range.
+
+--sort-by "log2_enrichment_penalized"
+Orders outputs by the log₂ transform of the τ‑penalized enrichment, which:
+
+compresses extreme values for readability, and
+incorporates cell‑type specificity via τ.
+
+#Batch normalization
+
+--batch-normalize median_scale with --batch-col "Cell type"
+Aligns per‑batch (here, per cell type) medians to the global median:
+
+<img width="252" height="60" alt="batch_normalization" src="https://github.com/user-attachments/assets/de347881-9bd5-4e4d-9442-09e21343f0c3" />
+
+This mitigates modest batch/scale differences across cell types and improves comparability before enrichment.
+
+#Specificity (Yanai’s τ) & penalization
+
+--specificity-mode penalize (override kept) and --min-specificity 0.8
+Computes τ per gene:
+
+Why penalize (vs filter):
+
+Keeps broad‑expression genes in the output (useful context),
+But downranks them so highly specific genes rise to the top.
+
+Top‑N exports
+
+--top-n 100 and --per-cell-type-top-n 20
+Provides two views: overall top list and per‑cell‑type top markers.
+The latter is particularly useful when exploring cell‑type‑specific signatures.
+
+#Net effect of these settings
+
+Start from MAD‑filtered cluster rows → cleaner signal.
+Require ≥ 3 clusters per (Gene × Cell type) → stronger replication.
+Use read‑count weighting → down‑weight small/noisy clusters.
+Compute enrichment with safeguards → numerically stable ratios.
+Apply τ penalization → specificity‑aware ranking (broad genes down‑weighted).
+Apply median scaling per cell type → reduces per‑type scale biases.
+Export overall and per‑cell‑type top lists → practical discovery workflow.
 
