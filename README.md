@@ -4503,3 +4503,13 @@ This is intermediate between:
 
 --alpha 0  → equal weighting
 --alpha 1  → full read‐fraction weighting
+
+3. Median–MAD Outlier Detection (--outlier-method median-mad)
+```
+--outlier-method median-mad
+--filter-scope row
+```
+the script computes outlier scores per row within each group using:
+
+<img width="330" height="505" alt="MAD_Score" src="https://github.com/user-attachments/assets/75cb536e-a55e-4cc3-b7a6-fe6cf1e0cbd5" />
+
