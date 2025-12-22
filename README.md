@@ -4663,7 +4663,9 @@ Range
 τ ≈ 0 ⇒ broadly expressed
 
 This gives a clean, well‑known measure of tissue/cell‑type specificity.
-Support modes
+
+
+Supported modes
 
 --specificity-mode off
 Only reports specificity_tau
