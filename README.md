@@ -4650,7 +4650,7 @@ The maximum expression of the gene across all K cell types:
 Interpretation
 
 If the gene is highly specific (strong expression in just one cell type),
-then thia is 1 in only one place and close to 0 in all others ⇒ τ approaches 1.
+then this is 1 in only one place and close to 0 in all others ⇒ τ approaches 1.
 If the gene is broadly expressed across all cell types,
 then this is similar for all iii ⇒ τ approaches 0.
 
