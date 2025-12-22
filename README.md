@@ -4456,13 +4456,10 @@ Before calculating specificity scores, I remove (gene × cell type) pairs where 
 
 Why this filtering is necessary
 
-Prevents false specificity
-A single noisy cluster can make a gene appear highly expressed in a cell type even when other clusters disagree.
+Prevents false specificity- A single noisy cluster can make a gene appear highly expressed in a cell type even when other clusters disagree.
 
-Creates fair comparisons across cell types
-Some cell types have many clusters; more clusters → more opportunity for outliers.
+Creates fair comparisons across cell types- Some cell types have many clusters; more clusters → more opportunity for outliers.
 
-Improves downstream scoring
-Enrichment and specificity metrics assume each input value reflects real biology, not cluster‑level noise.
+Improves downstream scoring- Enrichment and specificity metrics assume each input value reflects real biology, not cluster‑level noise.
 
 
