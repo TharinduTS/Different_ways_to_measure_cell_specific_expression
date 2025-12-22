@@ -4433,4 +4433,36 @@ args+=( "$@" )
 python3 "${script_dir}/universal_plot_maker.py" "${args[@]}"
 ``
 ```
+# Reasons behind methods and parameters
+
+My goal here is to come up with a method to find genes that exhibit a cell type specific expression pattern and coming up with a quantitative way to compare this.
+
+After considering multiple resources, I decided to work with the Human Protein Atlas dataset from rna_single_cell_cluster.tsv as it was more complete and had coverage in over 19k genes.
+```
+https://www.proteinatlas.org/humanproteome/single+cell/single+cell+type/data
+```
+Following is what the dataset looks like 
+```
+Gene    Gene name       Tissue  Cluster Cell type       Read count      nCPM
+ENSG00000000003 TSPAN6  ovary   c-0     ovarian stromal cells   493     92.5
+ENSG00000000003 TSPAN6  ovary   c-1     ovarian stromal cells   529     80.5
+ENSG00000000003 TSPAN6  ovary   c-2     ovarian stromal cells   143     52.3
+ENSG00000000003 TSPAN6  ovary   c-3     ovarian stromal cells   456     91.4
+```
+1) Getting rid of (Gene × Cell type) combinations with too much variation
+
+To measure cell‑type‑specific expression reliably, each (gene × cell type) pair needs a stable expression estimate. In the Human Protein Atlas dataset, a single cell type is often split into multiple clusters (c‑0, c‑1, c‑2…), each reporting its own nCPM. These cluster‑level values can differ widely due to noise, subpopulation differences, or low‑quality clusters.
+Before calculating specificity scores, I remove (gene × cell type) pairs where these cluster values disagree too much.
+
+Why this filtering is necessary
+
+Prevents false specificity
+A single noisy cluster can make a gene appear highly expressed in a cell type even when other clusters disagree.
+
+Creates fair comparisons across cell types
+Some cell types have many clusters; more clusters → more opportunity for outliers.
+
+Improves downstream scoring
+Enrichment and specificity metrics assume each input value reflects real biology, not cluster‑level noise.
+
 
