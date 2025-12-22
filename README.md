@@ -4492,7 +4492,6 @@ Filtering decisions are computed within these groups.
 2. How Row_base is built (controlled by --pair-base alpha and --alpha 0.5)
 Inside each group, the script computes:
 
-```image
 <img width="1536" height="1024" alt="Designer (1)" src="https://github.com/user-attachments/assets/8445c493-0707-4804-8b8c-81c2f663c095" />
-```
+
 
