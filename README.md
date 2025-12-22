@@ -4462,4 +4462,29 @@ Creates fair comparisons across cell types- Some cell types have many clusters; 
 
 Improves downstream scoring- Enrichment and specificity metrics assume each input value reflects real biology, not cluster‑level noise.
 
+#------------Explanation of parameters used in the filtering step----------------------------------------------------------------------
 
+I used following parameters in the filtering step
+```bash
+python filter_weighted_ncpm.py \
+  --input rna_single_cell_cluster.tsv \
+  --output rna_single_cell_cluster_filtered_rows_alpha_mad.tsv \
+  --filter-scope row \
+  --pair-base alpha \
+  --alpha 0.5 \
+  --outlier-method median-mad \
+  --mad-k 3.0 \
+  --group-cols Gene "Cell type" \
+  --summary-output rna_single_cell_cluster_summary.tsv \
+  --summary-source filtered \
+  --summary-cols "Gene" "Gene name" "Tissue" "Cell type" "Read count" "nCPM" "Row_mad_score" \
+```
+And following explains what these parameters mean.
+
+--filter-scope row
+Meaning:
+Filtering is applied per row group, where each group corresponds to all clusters of a specific (Gene × Cell type).
+
+Why:
+The goal is to remove unstable gene–cell-type pairs, not entire genes or cell types.
+Row‑group filtering isolates precisely the combinations we care about.
