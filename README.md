@@ -4482,14 +4482,14 @@ python filter_weighted_ncpm.py \
 And following explains what these parameters mean.
 
 
-#1. Grouping: What counts as a “Gene × Cell type” pair?
+#1. Grouping: What counts as a “Gene × Cell type” pair?*
 The script groups rows using:All clusters belonging to the same (Gene, Cell type) form one group.
 Filtering decisions are computed within these groups.
 
 ```bash
 --group-cols Gene "Cell type"
 ```
-#2. How Row_base is built (controlled by --pair-base alpha and --alpha 0.5)
+#2. How Row_base is built (controlled by --pair-base alpha and --alpha 0.5)*
 
 These rows contain both 'Read Count' and 'nCPM'.
 Therefore I can't use row values for filteration as it might be biased towards rows with a higher number of read counts. I can control the weight I have towards this by controlling alpha in the following equation. If alpha=0, there is no affect from the weighted values, if alpha is 1, it uses full read‐fraction weighting. I used alpha value 0.5 to only filter out extreme values.
