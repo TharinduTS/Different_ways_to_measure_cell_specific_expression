@@ -4594,8 +4594,11 @@ For each gene in a cell type:
 <img width="392" height="86" alt="avg_nCPM" src="https://github.com/user-attachments/assets/b1cb048c-9d6e-4156-a5fd-f155bb03a3f4" />
 
 This keeps larger, better‑sampled clusters from being overshadowed by tiny noisy ones.
+
 Unweighted aggregation (if --weighted off)
+
 You may choose --cluster-aggregate mean or median.
+
 Median is more robust; mean is smoother. I selected median to avoid huge biases intoduced by rows with huge wrong read counts etc
 
 #2. Compute enrichment score
@@ -4606,8 +4609,11 @@ For each (Gene, Cell type) pair:
 Safeguards:
 
 Denominator floored by --min-background (default 1e‑3)
+
 Optionally add pseudocount (--pseudocount)
+
 Optionally add pseudocount to numerator too (--pseudocount-to-numerator)
+
 Can cap extreme ratios (--clip-max)
 
 Also computes:
