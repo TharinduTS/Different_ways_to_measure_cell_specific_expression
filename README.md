@@ -4449,7 +4449,7 @@ ENSG00000000003 TSPAN6  ovary   c-1     ovarian stromal cells   529     80.5
 ENSG00000000003 TSPAN6  ovary   c-2     ovarian stromal cells   143     52.3
 ENSG00000000003 TSPAN6  ovary   c-3     ovarian stromal cells   456     91.4
 ```
-1) Getting rid of (Gene × Cell type) combinations with too much variation
+# 1) Getting rid of (Gene × Cell type) combinations with too much variation
 
 To measure cell‑type‑specific expression reliably, each (gene × cell type) pair needs a stable expression estimate. In the Human Protein Atlas dataset, a single cell type is often split into multiple clusters (c‑0, c‑1, c‑2…), each reporting its own nCPM. These cluster‑level values can differ widely due to noise, subpopulation differences, or low‑quality clusters.
 Before calculating specificity scores, I remove (gene × cell type) pairs where these cluster values disagree too much.
@@ -4551,3 +4551,225 @@ Outputs only the consistent (Gene × Cell type × cluster) rows
 <img width="533" height="356" alt="filtering_summary" src="https://github.com/user-attachments/assets/2d6d1c6b-4f46-4507-b3f2-6f663e53c71d" />
 
 #------------Explanation of parameters used in the filtering step----------------------------------------------------------------------
+
+# 2) Cell Type Enrichment v1.4
+
+My goal here is to build a robust, interpretable, and cell‑type‑aware enrichment method that accounts not only for expression magnitudes but also for specificity, replication, cluster size, and batch differences across clusters. Version v1.4 extends the older method by adding:
+
+Yanai’s τ specificity (tau)
+τ‑based filtering or penalization
+Optional batch normalization
+More flexible weighted/unweighted aggregation
+Additional top‑N exports for exploration
+
+This makes v1.4 more biologically meaningful and more resilient to noisy clusters, broad‑expression genes, and cell‑type imbalance.
+
+Dataset Used
+
+The method works directly on:
+```
+ene | Gene name | Cell type | Cluster | Read count | nCPM
+```
+These are the Human Protein Atlas single‑cell clusters, each representing multiple replicates belonging to the same cell type.
+
+Method Overview
+
+The celltype_enrichment_v1_4.py workflow has three conceptual stages:
+
+#1. Aggregate expression at the cell‑type level
+Clusters vary in size and reliability. To obtain a stable value per (Gene × Cell Type), the script provides:
+Weighted aggregation across clusters (default: --weighted on)
+For each gene in a cell type:
+<img width="392" height="86" alt="avg_nCPM" src="https://github.com/user-attachments/assets/b1cb048c-9d6e-4156-a5fd-f155bb03a3f4" />
+
+This keeps larger, better‑sampled clusters from being overshadowed by tiny noisy ones.
+Unweighted aggregation (if --weighted off)
+You may choose --cluster-aggregate mean or median.
+Median is more robust; mean is smoother. I selected median to avoid huge biases intoduced by rows with huge wrong read counts etc
+
+#2. Compute enrichment score
+For each (Gene, Cell type) pair:
+
+<img width="557" height="86" alt="enrichment" src="https://github.com/user-attachments/assets/0e42db63-949c-47a6-8e35-b0830e352426" />
+
+Safeguards:
+
+Denominator floored by --min-background (default 1e‑3)
+Optionally add pseudocount (--pseudocount)
+Optionally add pseudocount to numerator too (--pseudocount-to-numerator)
+Can cap extreme ratios (--clip-max)
+
+Also computes:
+
+<img width="196" height="51" alt="log_enrichment" src="https://github.com/user-attachments/assets/7208ece0-89bf-4aa1-a589-5a4f1eb3563f" />
+
+to stabilize visualization 
+
+the “+ ε” (epsilon) is simply a tiny positive constant added to avoid taking the logarithm of zero or a negative number.
+
+#3. τ (Tau) Specificity Computation
+
+Cell‑type specificity matters. A gene expressed everywhere (even at medium levels) should not rank above a gene sharply specific to one cell type. Otherwise I found genes that are not highly cell type specific getting ranked higher just because they had a very high level of gene expression even though they were also expressed in other cell types
+
+τ ranges from 0 (broad expression) to 1 (highly specific).
+For a gene with expression vector xxx across cell types:
+
+<img width="225" height="64" alt="tau" src="https://github.com/user-attachments/assets/0acf6d13-bb04-4e24-97a0-e9b7fba91dbd" />
+
+Where:
+<img width="32" height="31" alt="xi" src="https://github.com/user-attachments/assets/c8a99e02-330f-4ed5-918c-2f171c9f1f5d" />
+​
+The expression level of the gene in cell type i.
+In this method, xi is the avg_nCPM value computed after aggregating across clusters of that cell type.
+
+K:
+The total number of cell types in which the gene appears (i.e., number of avg_nCPM values available for that gene).
+max⁡(x)
+
+The maximum expression of the gene across all K cell types:
+
+<img width="272" height="44" alt="max_x" src="https://github.com/user-attachments/assets/108f7760-33fd-4863-8c5c-6dee7b80ad27" />
+
+Interpretation
+
+If the gene is highly specific (strong expression in just one cell type),
+then xi/max⁡(x)x_i / \max(x)xi​/max(x) is 1 in only one place and close to 0 in all others ⇒ τ approaches 1.
+If the gene is broadly expressed across all cell types,
+then xi/max⁡(x)x_i / \max(x)xi​/max(x) is similar for all iii ⇒ τ approaches 0.
+
+Range
+
+<img width="109" height="43" alt="T_range" src="https://github.com/user-attachments/assets/f9b968bd-0d25-43e8-97b3-67a1336f2b80" />
+
+
+τ ≈ 1 ⇒ sharply cell‑type‑specific
+τ ≈ 0 ⇒ broadly expressed
+
+This gives a clean, well‑known measure of tissue/cell‑type specificity.
+Support modes
+
+--specificity-mode off
+Only reports specificity_tau
+
+--specificity-mode filter
+Drops genes with τ below --min-specificity
+
+--specificity-mode penalize
+Penalizes enrichment by multiplying by τ:
+
+<img width="336" height="48" alt="punished_enrichment" src="https://github.com/user-attachments/assets/b82eb861-5a24-4450-8e96-cfb09b07c48b" />
+
+#---------------------Why I Used Each Parameter and Value-----------------------------------------------------
+
+Below is the command I used for v1.4, with explanations for each flag.
+
+Baseline run wrapper (what the script is configured to do by default)
+```bash
+
+#!/usr/bin/env bash
+# run_celltype_enrichment_with_options.sh (v1.4 with τ report & penalization)
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+args=(
+  --input-file rna_single_cell_cluster.tsv
+  --output-file celltype_enrichment.tsv
+  --top-n 100
+  --per-cell-type-top-n 20
+
+  --gene-col "Gene"
+  --gene-name-col "Gene name"
+  --cell-type-col "Cell type"
+  --cluster-col "Cluster"
+  --batch-col "Cell type"
+  --value-col "nCPM"
+  --weight-col "Read count"
+
+  --weighted on
+  --cluster-aggregate mean
+
+  --min-clusters 2
+  --min-expr-threshold 0.00
+  # --treat-nan-as-zero   # (commented in the wrapper)
+
+  --min-background 1e-3
+  --min-expression 0.001
+  --min-count 2
+  --pseudocount 0.001
+  # --pseudocount-to-numerator
+  # --clip-max 100
+
+  --sort-by "log2_enrichment_penalized"
+
+  --batch-normalize median_scale
+
+  --specificity-mode penalize
+  --min-specificity 0.8
+)
+
+args+=("$@")  # allow overrides
+
+python3 "${script_dir}/celltype_enrichment_v1_4.py" "${args[@]}"
+```
+Overrides used in this run (what actually took effect)
+```
+
+./run_celltype_enrichment_v1_4.sh \
+  --input-file rna_single_cell_cluster_filtered_rows_alpha_mad.tsv \
+  --output-file enrichV1_4_3clusters.tsv \
+  --min-clusters 3 \
+  --specificity-mode penalize
+```
+So the effective configuration was the baseline above, plus these overrides:
+
+--input-file rna_single_cell_cluster_filtered_rows_alpha_mad.tsv
+(use the post‑filter table from the MAD outlier step)
+--output-file enrichV1_4_3clusters.tsv
+(custom output file name)
+--min-clusters 3
+(stricter replication per (Gene × Cell type) than the baseline 2)
+--specificity-mode penalize
+(kept from baseline; explicitly reiterated by your override)
+
+All other parameters remained as in the baseline wrapper.
+
+#Why each parameter/value was chosen
+
+Inputs / outputs
+
+
+--input-file rna_single_cell_cluster_filtered_rows_alpha_mad.tsv
+Uses rows already denoised by your MAD filter (median–MAD with α‑weighted Row_base).
+This ensures enrichment starts from stable cluster values and reduces false positives driven by outliers.
+
+--output-file enrichV1_4_3clusters.tsv
+A run‑specific filename clarifies that this output applies a min‑clusters = 3 rule.
+
+Weighted aggregation
+
+--weighted on and --weight-col "Read count"
+Aggregation across clusters is weighted by read count:
+
+<img width="392" height="86" alt="avg_nCPM" src="https://github.com/user-attachments/assets/8b7d1a56-8a88-4f6b-bc4a-9fa12e11011f" />
+
+This reduces the influence of small, noisy clusters and aligns with your earlier choice to stabilize measurements.
+
+--cluster-aggregate mean (used only if --weighted off)
+Mean is chosen for smoother quantitative behavior; median would be more robust but can compress meaningful dynamic range.
+
+Replication guard
+
+--min-clusters 3 (override)
+Requires at least 3 clusters for a (Gene × Cell type) row to be kept in average nCPM. This prevents wrongfully assigned rows by Human Protein Atlas pipeline messing up my algorithm output
+
+Pre‑enrichment cleanup
+
+
+--min-expr-threshold 0.00
+Keeps rows with any non‑zero avg_nCPM; avoids discarding potential on/off signals prematurely.
+
+
+# --treat-nan-as-zero (commented)
+If enabled, this would treat NaNs as zeros when deciding “no expression” genes to drop.
+You left it off to avoid conflating missing values with true zeros.
+
