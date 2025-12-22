@@ -4504,6 +4504,10 @@ This is intermediate between:
 --alpha 0  → equal weighting
 --alpha 1  → full read‐fraction weighting
 
+This value is stored in the column 
+```
+Row_base
+```
 3. Median–MAD Outlier Detection (--outlier-method median-mad)
 ```
 --outlier-method median-mad
