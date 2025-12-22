@@ -4509,6 +4509,8 @@ Inside each group, the script computes:
 <img width="310" height="136" alt="row_base" src="https://github.com/user-attachments/assets/3ed7fdfc-acac-4a90-8d64-3b9211c6c432" />
 
 Weight = normalized sqrt(read count) within the group
+
+
 This is intermediate between:
 
 --alpha 0  → equal weighting
