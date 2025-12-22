@@ -4508,6 +4508,7 @@ This value is stored in the column
 ```
 Row_base
 ```
+and used in step 3 below (b values)
 3. Median–MAD Outlier Detection (--outlier-method median-mad)
 ```
 --outlier-method median-mad
