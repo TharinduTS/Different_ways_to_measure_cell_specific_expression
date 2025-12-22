@@ -4482,14 +4482,14 @@ python filter_weighted_ncpm.py \
 And following explains what these parameters mean.
 
 
-1. Grouping: What counts as a “Gene × Cell type” pair?
+#1. Grouping: What counts as a “Gene × Cell type” pair?
 The script groups rows using:All clusters belonging to the same (Gene, Cell type) form one group.
 Filtering decisions are computed within these groups.
 
 ```bash
 --group-cols Gene "Cell type"
 ```
-2. How Row_base is built (controlled by --pair-base alpha and --alpha 0.5)
+#2. How Row_base is built (controlled by --pair-base alpha and --alpha 0.5)
 
 These rows contain both 'Read Count' and 'nCPM'.
 Therefore I can't use row values for filteration as it might be biased towards rows with a higher number of read counts. I can control the weight I have towards this by controlling alpha in the following equation. If alpha=0, there is no affect from the weighted values, if alpha is 1, it uses full read‐fraction weighting. I used alpha value 0.5 to only filter out extreme values.
@@ -4510,7 +4510,7 @@ Row_base
 ```
 and used in step 3 below (b values)
 
-3. Median–MAD Outlier Detection (--outlier-method median-mad)
+#3. Median–MAD Outlier Detection (--outlier-method median-mad)
 ```
 --outlier-method median-mad
 --filter-scope row
@@ -4519,18 +4519,18 @@ the script computes outlier scores per row within each group using:
 
 <img width="330" height="505" alt="MAD_Score" src="https://github.com/user-attachments/assets/75cb536e-a55e-4cc3-b7a6-fe6cf1e0cbd5" />
 
-4. Filtering rule (--mad-k 3.0)
+#4. Filtering rule (--mad-k 3.0)
 A row is kept only if:
 <img width="86" height="40" alt="z_limit" src="https://github.com/user-attachments/assets/17c288c1-ca93-4248-bb5d-7ee112101f6e" />
 
 #***This is a process of fine tuning and we may have to change these values later****
 
-5. Summary file (--summary-source filtered)
+#5. Summary file (--summary-source filtered)
 the summary file contains only rows that survived filtering.
 ```
 "Gene" "Gene name" "Tissue" "Cell type" "Read count" "nCPM" "Row_mad_score"
 ```
-6. Final interpretation
+#6. Final interpretation
 This filtering process removes clusters whose weighted nCPM values deviate excessively from the group median after applying α‑weighted read count scaling. The combination:
 
 --pair-base alpha
@@ -4546,7 +4546,8 @@ Measures variation from the group median
 Removes rows with unusually large deviation (MAD > 3)
 Outputs only the consistent (Gene × Cell type × cluster) rows
 
-7. Exact mathematical pipeline (final overview)
+#7. Exact mathematical pipeline (final overview)
 
 <img width="533" height="356" alt="filtering_summary" src="https://github.com/user-attachments/assets/2d6d1c6b-4f46-4507-b3f2-6f663e53c71d" />
 
+#------------Explanation of parameters used in the filtering step----------------------------------------------------------------------
