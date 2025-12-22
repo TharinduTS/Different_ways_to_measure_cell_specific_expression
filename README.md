@@ -4491,11 +4491,14 @@ Filtering decisions are computed within these groups.
 ```
 2. How Row_base is built (controlled by --pair-base alpha and --alpha 0.5)
 Inside each group, the script computes:
+
+```txt
 wi=(ReadCounti)α∑j∈group(ReadCountj)αw_i = \frac{(\text{ReadCount}_i)^{\alpha}}
           {\sum_{j \in \text{group}} (\text{ReadCount}_j)^{\alpha}}wi​=∑j∈group​(ReadCountj​)α(ReadCounti​)α​
-Row_basei=nCPMi×wi\text{Row\_base}_i = \text{nCPM}_i \times w_iRow_basei​=nCPMi​×wi​
+Row_basei=nCPMi×wi\text{Row\_base}_i = \text{nCPM}_i \times w_iRow_basei​=nCPMi​×wi
+​
 For my run (--alpha 0.5):
-
+```
 Weight = sqrt(read count) normalized within the group
 This is intermediate between:
 
