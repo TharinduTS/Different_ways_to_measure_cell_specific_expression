@@ -4650,9 +4650,9 @@ The maximum expression of the gene across all K cell types:
 Interpretation
 
 If the gene is highly specific (strong expression in just one cell type),
-then xi/max⁡(x)x_i / \max(x)xi​/max(x) is 1 in only one place and close to 0 in all others ⇒ τ approaches 1.
+then thia is 1 in only one place and close to 0 in all others ⇒ τ approaches 1.
 If the gene is broadly expressed across all cell types,
-then xi/max⁡(x)x_i / \max(x)xi​/max(x) is similar for all iii ⇒ τ approaches 0.
+then this is similar for all iii ⇒ τ approaches 0.
 
 Range
 
