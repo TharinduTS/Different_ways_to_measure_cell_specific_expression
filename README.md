@@ -4845,11 +4845,17 @@ The latter is particularly useful when exploring cell‑type‑specific signatur
 #Net effect of these settings
 
 Start from MAD‑filtered cluster rows → cleaner signal.
+
 Require ≥ 3 clusters per (Gene × Cell type) → stronger replication.
+
 Use read‑count weighting → down‑weight small/noisy clusters.
+
 Compute enrichment with safeguards → numerically stable ratios.
+
 Apply τ penalization → specificity‑aware ranking (broad genes down‑weighted).
+
 Apply median scaling per cell type → reduces per‑type scale biases.
+
 Export overall and per‑cell‑type top lists → practical discovery workflow.
 
 #---------------------Why I Used Each Parameter and Value in celltype Enrichment-----------------------------------------------------
