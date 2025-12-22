@@ -4582,7 +4582,6 @@ The method works directly on:
 ```
 Gene | Gene name | Cell type | Cluster | Read count | nCPM
 ```
-These are the Human Protein Atlas single‑cell clusters, each representing multiple replicates belonging to the same cell type.
 
 Method Overview
 
